@@ -1,0 +1,18 @@
+FROM ubuntu:24.04
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    git curl wget ca-certificates \
+    build-essential \
+    python3 python3-pip python3-venv \
+    nodejs npm \
+    ripgrep fd-find jq tree \
+    openssh-client \
+    && rm -rf /var/lib/apt/lists/*
+
+# Claude Code
+RUN npm install -g @anthropic-ai/claude-code
+
+# Codex (OpenAI)
+RUN npm install -g @openai/codex
+
+WORKDIR /workspace
