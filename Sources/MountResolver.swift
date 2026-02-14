@@ -74,7 +74,25 @@ enum MountResolver: Sendable {
                         guard fm.fileExists(atPath: src.path, isDirectory: &isDir), !isDir.boolValue else {
                             continue
                         }
+                        // Skip symlinks to prevent exfiltrating files outside ~/.ssh
+                        let attrs = try? fm.attributesOfItem(atPath: src.path)
+                        if let fileType = attrs?[.type] as? FileAttributeType, fileType == .typeSymbolicLink {
+                            continue
+                        }
                         try fm.copyItem(at: src, to: sshCopy.appendingPathComponent(item))
+                    }
+                    // Set restrictive permissions on private key files
+                    let copiedFiles = try? fm.contentsOfDirectory(atPath: sshCopy.path)
+                    for file in copiedFiles ?? [] {
+                        // Public keys (.pub), known_hosts, and config are fine with default perms
+                        guard
+                            !file.hasSuffix(".pub") && file != "known_hosts"
+                                && file != "known_hosts.old" && file != "config"
+                        else {
+                            continue
+                        }
+                        let filePath = sshCopy.appendingPathComponent(file).path
+                        try? fm.setAttributes([.posixPermissions: 0o600], ofItemAtPath: filePath)
                     }
                 } catch {
                     logger.warning("Failed to copy .ssh files to container state: \(error.localizedDescription)")

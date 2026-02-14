@@ -83,7 +83,7 @@ enum ContainerRunner: Sendable {
             cpus: cpus, memory: memory
         )
 
-        let cmd = ([containerPath] + args).joined(separator: " ")
+        let cmd = ([containerPath] + sanitizeForLogging(args)).joined(separator: " ")
         logger.debug("+ \(cmd)")
 
         // When stdin is a TTY, replace our process with `container` via execv.
@@ -132,6 +132,27 @@ enum ContainerRunner: Sendable {
         signal(SIGTERM, SIG_DFL)
 
         return process.terminationStatus
+    }
+
+    /// Return a copy of the args array with `--env` values redacted for safe logging.
+    /// Each `"--env"` flag is followed by `"KEY=VALUE"`; the value portion is replaced with `***`.
+    private static func sanitizeForLogging(_ args: [String]) -> [String] {
+        var sanitized: [String] = []
+        var redactNext = false
+        for arg in args {
+            if redactNext {
+                if let eqIndex = arg.firstIndex(of: "=") {
+                    sanitized.append(String(arg[...eqIndex]) + "***")
+                } else {
+                    sanitized.append(arg)
+                }
+                redactNext = false
+            } else {
+                sanitized.append(arg)
+                redactNext = (arg == "--env")
+            }
+        }
+        return sanitized
     }
 
     /// Run a raw command against the container CLI (for exec, list, stop, etc.)

@@ -61,6 +61,28 @@ extension Spawn {
                 throw ValidationError("Path is not a directory: \(path.path)")
             }
 
+            // Validate additional mount paths
+            for mountPath in mount {
+                var isMountDir: ObjCBool = false
+                guard FileManager.default.fileExists(atPath: mountPath, isDirectory: &isMountDir) else {
+                    throw ValidationError("Mount path does not exist: \(mountPath)")
+                }
+                guard isMountDir.boolValue else {
+                    throw ValidationError("Mount path is not a directory: \(mountPath)")
+                }
+            }
+
+            // Validate read-only mount paths
+            for roPath in readOnlyMounts {
+                var isRODir: ObjCBool = false
+                guard FileManager.default.fileExists(atPath: roPath, isDirectory: &isRODir) else {
+                    throw ValidationError("Read-only mount path does not exist: \(roPath)")
+                }
+                guard isRODir.boolValue else {
+                    throw ValidationError("Read-only mount path is not a directory: \(roPath)")
+                }
+            }
+
             // Resolve agent profile
             guard let profile = AgentProfile.named(agent) else {
                 throw ValidationError("Unknown agent: \(agent). Use 'claude-code' or 'codex'.")
