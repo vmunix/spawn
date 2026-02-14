@@ -18,7 +18,16 @@ let package = Package(
         .testTarget(
             name: "cccTests",
             dependencies: ["ccc"],
-            path: "Tests"
+            path: "Tests",
+            swiftSettings: [
+                .unsafeFlags(["-F", "/Library/Developer/CommandLineTools/Library/Developer/Frameworks"]),
+            ],
+            linkerSettings: [
+                .unsafeFlags(["-F", "/Library/Developer/CommandLineTools/Library/Developer/Frameworks",
+                              "-framework", "Testing",
+                              "-Xlinker", "-rpath",
+                              "-Xlinker", "/Library/Developer/CommandLineTools/Library/Developer/Frameworks"]),
+            ]
         ),
     ]
 )
