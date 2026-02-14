@@ -1,6 +1,8 @@
 import Foundation
 
-enum Paths {
+/// XDG Base Directory paths for spawn's config and state.
+/// Respects `XDG_CONFIG_HOME` and `XDG_STATE_HOME` environment variables.
+enum Paths: Sendable {
     static var configDir: URL {
         configDir(xdgConfigHome: ProcessInfo.processInfo.environment["XDG_CONFIG_HOME"])
     }

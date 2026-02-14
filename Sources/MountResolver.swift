@@ -1,6 +1,9 @@
 import Foundation
 
-enum MountResolver {
+/// Builds the full mount list for a container run (workspace, git/SSH, agent state).
+enum MountResolver: Sendable {
+    /// Resolve all mounts for the given target directory, agent, and options.
+    /// Copies git/SSH configs to the XDG state dir to work around VirtioFS uid issues.
     static func resolve(
         target: URL,
         additional: [String],

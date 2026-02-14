@@ -1,4 +1,6 @@
-enum ContainerfileTemplates {
+/// Embedded Containerfile strings for each toolchain, so `spawn build` works without repo files.
+enum ContainerfileTemplates: Sendable {
+    /// Returns the Containerfile content for the given toolchain.
     static func content(for toolchain: Toolchain) -> String {
         switch toolchain {
         case .base: return base

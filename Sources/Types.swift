@@ -1,5 +1,6 @@
 import Foundation
 
+/// Supported language toolchains, each corresponding to a container image variant.
 enum Toolchain: String, CaseIterable, Sendable {
     case base
     case cpp
@@ -7,6 +8,7 @@ enum Toolchain: String, CaseIterable, Sendable {
     case go
 }
 
+/// A host-to-guest filesystem mount for the container.
 struct Mount: Sendable {
     let hostPath: String
     let guestPath: String
@@ -32,6 +34,7 @@ struct Mount: Sendable {
     }
 }
 
+/// Configuration for a supported AI coding agent (entrypoint, resource defaults).
 struct AgentProfile: Sendable {
     let name: String
     let entrypoint: [String]

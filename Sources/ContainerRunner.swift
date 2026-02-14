@@ -1,6 +1,7 @@
 import Foundation
 
-enum ContainerRunner {
+/// Invokes Apple's `container` CLI to run, exec, and manage containers.
+enum ContainerRunner: Sendable {
     static let containerPath: String = {
         for path in ["/opt/homebrew/bin/container", "/usr/local/bin/container"] {
             if FileManager.default.fileExists(atPath: path) { return path }
@@ -8,6 +9,7 @@ enum ContainerRunner {
         return "container"  // hope it's on PATH
     }()
 
+    /// Build the argument array for `container run`. Pure function — no side effects.
     static func buildArgs(
         image: String,
         mounts: [Mount],
@@ -56,6 +58,8 @@ enum ContainerRunner {
         return args
     }
 
+    /// Launch a container. Uses `execv` when stdin is a TTY (for direct terminal access),
+    /// falls back to `Foundation.Process` with signal forwarding otherwise.
     static func run(
         image: String,
         mounts: [Mount],

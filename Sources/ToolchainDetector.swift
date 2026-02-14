@@ -1,6 +1,7 @@
 import Foundation
 
-enum ToolchainDetector {
+/// Priority-ordered toolchain detection from project files and configuration.
+enum ToolchainDetector: Sendable {
     /// Returns nil when a Dockerfile/Containerfile is found (caller should build it directly).
     /// Returns a Toolchain when a spawn-* image variant should be used.
     static func detect(in directory: URL) -> Toolchain? {

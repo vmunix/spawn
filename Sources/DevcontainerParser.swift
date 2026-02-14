@@ -1,5 +1,6 @@
 import Foundation
 
+/// Parsed result from a `.devcontainer/devcontainer.json` file.
 struct DevcontainerConfig: Sendable {
     let toolchain: Toolchain?
     let image: String?

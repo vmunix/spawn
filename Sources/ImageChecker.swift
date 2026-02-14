@@ -1,7 +1,8 @@
 import ContainerizationOCI
 import Foundation
 
-enum ImageChecker {
+/// Pre-flight check against the `container` CLI's local image store.
+enum ImageChecker: Sendable {
     /// Root of the container CLI's application data.
     /// The `container` CLI stores image state at:
     ///   ~/Library/Application Support/com.apple.container/state.json
