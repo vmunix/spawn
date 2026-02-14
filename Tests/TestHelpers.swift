@@ -1,5 +1,10 @@
 import Foundation
 
+/// Helper: create a file URL from a path string
+func fileURL(_ path: String) -> URL {
+    URL(fileURLWithPath: path)
+}
+
 /// Helper: create a temp directory with specified files
 func makeTempDir(files: [String: String]) throws -> URL {
     let base = URL(fileURLWithPath: NSTemporaryDirectory())
