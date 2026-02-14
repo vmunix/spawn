@@ -68,6 +68,38 @@ import Testing
     #expect(args.last == "/bin/bash")
 }
 
+// MARK: - Safe mode env var tests
+
+@Test func safeModeIncludesSafeEnvVar() {
+    let args = ContainerRunner.buildArgs(
+        image: "spawn-base:latest",
+        mounts: [],
+        env: ["SPAWN_SAFE_MODE": "1"],
+        workdir: "/workspace/test",
+        entrypoint: ["claude"],
+        cpus: 4,
+        memory: "8g",
+    )
+
+    let envArgs = zip(args, args.dropFirst()).filter { $0.0 == "--env" }.map(\.1)
+    #expect(envArgs.contains("SPAWN_SAFE_MODE=1"))
+}
+
+@Test func yoloModeOmitsSafeEnvVar() {
+    let args = ContainerRunner.buildArgs(
+        image: "spawn-base:latest",
+        mounts: [],
+        env: [:],
+        workdir: "/workspace/test",
+        entrypoint: ["claude", "--dangerously-skip-permissions"],
+        cpus: 4,
+        memory: "8g",
+    )
+
+    let envArgs = zip(args, args.dropFirst()).filter { $0.0 == "--env" }.map(\.1)
+    #expect(!envArgs.contains("SPAWN_SAFE_MODE=1"))
+}
+
 // MARK: - Preflight tests
 
 @Test func preflightThrowsForMissingBinary() throws {
