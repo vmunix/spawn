@@ -33,23 +33,37 @@ enum MountResolver {
         }
 
         // Git/SSH mounts
+        // VirtioFS preserves host file ownership/permissions, so files owned by the
+        // macOS user (uid 501) with 600 permissions are unreadable by the container's
+        // coder user (uid 1001). We copy to ~/.ccc/state/ where we control permissions,
+        // and mount the copies. The Containerfile has symlinks from the expected paths
+        // into these mount points.
         if includeGit {
             let home = FileManager.default.homeDirectoryForCurrentUser
             let fm = FileManager.default
 
-            let gitconfig = home.appendingPathComponent(".gitconfig").path
-            if fm.fileExists(atPath: gitconfig) {
+            let gitconfig = home.appendingPathComponent(".gitconfig")
+            if fm.fileExists(atPath: gitconfig.path) {
+                let gitDir = stateDir.appendingPathComponent("git")
+                try? fm.createDirectory(at: gitDir, withIntermediateDirectories: true)
+                let dest = gitDir.appendingPathComponent(".gitconfig")
+                try? fm.removeItem(at: dest)
+                try? fm.copyItem(at: gitconfig, to: dest)
                 mounts.append(Mount(
-                    hostPath: gitconfig,
-                    guestPath: "/home/coder/.gitconfig",
+                    hostPath: gitDir.path,
+                    guestPath: "/home/coder/.gitconfig-dir",
                     readOnly: true
                 ))
             }
 
-            let sshDir = home.appendingPathComponent(".ssh").path
-            if fm.fileExists(atPath: sshDir) {
+            let sshDir = home.appendingPathComponent(".ssh")
+            if fm.fileExists(atPath: sshDir.path) {
+                let sshCopy = stateDir.appendingPathComponent("ssh")
+                // Fresh copy each run to pick up key changes
+                try? fm.removeItem(at: sshCopy)
+                try? fm.copyItem(at: sshDir, to: sshCopy)
                 mounts.append(Mount(
-                    hostPath: sshDir,
+                    hostPath: sshCopy.path,
                     guestPath: "/home/coder/.ssh",
                     readOnly: true
                 ))

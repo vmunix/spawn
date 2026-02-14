@@ -32,11 +32,13 @@ enum ContainerfileTemplates {
     RUN curl -fsSL https://claude.ai/install.sh | bash
     ENV PATH="/home/coder/.local/bin:${PATH}"
 
-    # Symlink ~/.claude.json into a mounted directory so atomic renames work.
-    # VirtioFS doesn't support rename on single-file bind mounts (EBUSY).
-    RUN mkdir -p /home/coder/.claude-state \\
+    # Symlink config files into mounted directories.
+    # VirtioFS doesn't support atomic rename on single-file bind mounts (EBUSY),
+    # and preserves host uid/permissions making direct file mounts unreadable.
+    RUN mkdir -p /home/coder/.claude-state /home/coder/.gitconfig-dir \\
         && rm -f /home/coder/.claude.json \\
-        && ln -s /home/coder/.claude-state/claude.json /home/coder/.claude.json
+        && ln -s /home/coder/.claude-state/claude.json /home/coder/.claude.json \\
+        && ln -sf /home/coder/.gitconfig-dir/.gitconfig /home/coder/.gitconfig
 
     WORKDIR /workspace
     """
