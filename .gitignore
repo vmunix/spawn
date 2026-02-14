@@ -2,5 +2,6 @@
 .swiftpm/
 
 # Fixture build artifacts
+fixtures/cpp-sample/build/
 fixtures/go-sample/go-sample
 fixtures/rust-sample/target/

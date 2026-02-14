@@ -57,15 +57,39 @@ enum ContainerfileTemplates: Sendable {
         WORKDIR /workspace
         """
 
+    /// The LLVM/Clang major version used in the cpp Containerfile template.
+    private static let clangVersion = "21"
+
     static let cpp = """
         FROM spawn-base:latest
 
         USER root
+
+        # Add LLVM apt repository for clang-\(clangVersion)
         RUN apt-get update && apt-get install -y --no-install-recommends \\
-            clang clang-format clang-tidy \\
-            cmake ninja-build \\
-            gdb valgrind \\
+                ca-certificates wget gnupg \\
+            && wget -qO- https://apt.llvm.org/llvm-snapshot.gpg.key \\
+                | tee /etc/apt/trusted.gpg.d/apt.llvm.org.asc \\
+            && echo "deb http://apt.llvm.org/noble/ llvm-toolchain-noble-\(clangVersion) main" \\
+                > /etc/apt/sources.list.d/llvm.list \\
             && rm -rf /var/lib/apt/lists/*
+
+        # Install clang-\(clangVersion) toolchain and dev tools
+        RUN apt-get update && apt-get install -y --no-install-recommends \\
+                clang-\(clangVersion) clang-format-\(clangVersion) clang-tidy-\(clangVersion) \\
+                clang-tools-\(clangVersion) lld-\(clangVersion) \\
+                libc++-\(clangVersion)-dev libc++abi-\(clangVersion)-dev \\
+                cmake ninja-build \\
+                gdb valgrind \\
+            && rm -rf /var/lib/apt/lists/*
+
+        # Set clang-\(clangVersion) as default via update-alternatives
+        RUN update-alternatives --install /usr/bin/clang clang /usr/bin/clang-\(clangVersion) 200 \\
+            && update-alternatives --install /usr/bin/clang++ clang++ /usr/bin/clang++-\(clangVersion) 200 \\
+            && update-alternatives --install /usr/bin/clang-format clang-format /usr/bin/clang-format-\(clangVersion) 100 \\
+            && update-alternatives --install /usr/bin/clang-tidy clang-tidy /usr/bin/clang-tidy-\(clangVersion) 100 \\
+            && update-alternatives --install /usr/bin/ld.lld ld.lld /usr/bin/ld.lld-\(clangVersion) 100
+
         USER coder
         """
 
