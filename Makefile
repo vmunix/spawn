@@ -1,7 +1,7 @@
 PREFIX ?= /usr/local
 BINARY = spawn
 
-.PHONY: build install uninstall clean test lint format images
+.PHONY: build install uninstall clean test lint format images smoke
 
 build:
 	swift build -c release
@@ -24,6 +24,17 @@ uninstall:
 
 clean:
 	swift package clean
+
+smoke: build
+	@echo "=== Go fixture: build + test ==="
+	echo 'set -e && go version && go build ./... && go test -v ./... && echo "PASS: go-sample"' | \
+		.build/release/$(BINARY) fixtures/go-sample --shell
+	@echo ""
+	@echo "=== Rust fixture: build + test ==="
+	echo 'set -e && rustc --version && cargo build 2>&1 && cargo test 2>&1 && echo "PASS: rust-sample"' | \
+		.build/release/$(BINARY) fixtures/rust-sample --shell
+	@echo ""
+	@echo "=== All smoke tests passed ==="
 
 images:
 	container build -t spawn-base:latest -f Images/base/Containerfile .
