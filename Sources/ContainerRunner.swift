@@ -1,7 +1,12 @@
 import Foundation
 
 enum ContainerRunner {
-    static let containerPath = "/usr/local/bin/container"
+    static let containerPath: String = {
+        for path in ["/opt/homebrew/bin/container", "/usr/local/bin/container"] {
+            if FileManager.default.fileExists(atPath: path) { return path }
+        }
+        return "container" // hope it's on PATH
+    }()
 
     static func buildArgs(
         image: String,
@@ -12,7 +17,7 @@ enum ContainerRunner {
         cpus: Int,
         memory: String
     ) -> [String] {
-        var args = ["run", "--rm"]
+        var args = ["run", "--rm", "-i"]
 
         // Resources
         args += ["--cpus", "\(cpus)"]

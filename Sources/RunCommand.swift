@@ -98,14 +98,16 @@ extension CCC {
                 environment[key] = value
             }
 
-            // Validate required env vars
-            let missing = EnvLoader.validateRequired(profile.requiredEnvVars, in: environment)
-            if !missing.isEmpty {
-                let vars = missing.joined(separator: ", ")
-                throw ValidationError(
-                    "Missing required environment variables: \(vars)\n" +
-                    "Set them in ~/.ccc/env or pass with --env"
-                )
+            // Validate required env vars (skip in shell mode)
+            if !shell {
+                let missing = EnvLoader.validateRequired(profile.requiredEnvVars, in: environment)
+                if !missing.isEmpty {
+                    let vars = missing.joined(separator: ", ")
+                    throw ValidationError(
+                        "Missing required environment variables: \(vars)\n" +
+                        "Set them in ~/.ccc/env or pass with --env"
+                    )
+                }
             }
 
             // Determine entrypoint
