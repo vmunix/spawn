@@ -85,6 +85,7 @@ Tests use Apple's `swift-testing` framework (added as an explicit package depend
 | `ImageChecker.swift` | Pre-flight image existence check against container CLI's image store |
 | `ContainerfileTemplates.swift` | Embedded Containerfile strings for base/cpp/rust/go |
 | `BuildCommand.swift` | Writes embedded template to temp file, invokes `container build`, enforces base-first ordering |
+| `Log.swift` | Shared `Logger` instance (swift-log), bootstrapped to stderr, default level `.warning` |
 
 ## Coding Conventions
 
@@ -119,12 +120,15 @@ Document public types and non-obvious functions with `///` comments. Focus on:
 - Module-level type descriptions
 - Skip trivial getters/setters and self-evident code
 
+### Logging
+
+Uses [swift-log](https://github.com/apple/swift-log) with `StreamLogHandler.standardError`. A shared `logger` (in `Log.swift`) defaults to `.warning` (silent); commands set `.debug` when `--verbose` is passed. Use `logger.debug()` for diagnostic output (container commands, internal state). Keep `print()` for user-facing status messages (build progress, etc.).
+
 ### Future Patterns
 
 As spawn grows, adopt these patterns from the containerization library:
 - **Configuration structs with builder closures** for complex initialization (e.g., container config)
 - **Private state enums** with associated values for lifecycle management (e.g., VM states)
-- **swift-log** with a custom `StderrLogHandler` to replace manual stderr writes in `--verbose` mode
 
 ## Migration Path
 

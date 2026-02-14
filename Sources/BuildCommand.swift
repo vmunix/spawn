@@ -14,6 +14,8 @@ extension CCC {
         var verbose: Bool = false
 
         mutating func run() throws {
+            if verbose { logger.logLevel = .debug }
+
             let toolchains: [Toolchain]
             if let name = toolchain {
                 guard let tc = Toolchain(rawValue: name) else {

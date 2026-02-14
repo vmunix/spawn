@@ -67,8 +67,7 @@ enum ContainerRunner: Sendable {
         workdir: String,
         entrypoint: [String],
         cpus: Int,
-        memory: String,
-        verbose: Bool
+        memory: String
     ) throws -> Int32 {
         let args = buildArgs(
             image: image, mounts: mounts, env: env,
@@ -76,10 +75,8 @@ enum ContainerRunner: Sendable {
             cpus: cpus, memory: memory
         )
 
-        if verbose {
-            let cmd = ([containerPath] + args).joined(separator: " ")
-            FileHandle.standardError.write(Data("+ \(cmd)\n".utf8))
-        }
+        let cmd = ([containerPath] + args).joined(separator: " ")
+        logger.debug("+ \(cmd)")
 
         // When stdin is a TTY, replace our process with `container` via execv.
         // This gives the container CLI direct terminal access (needed for -t flag,

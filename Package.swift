@@ -6,6 +6,7 @@ let package = Package(
     platforms: [.macOS(.v15)],
     dependencies: [
         .package(url: "https://github.com/apple/swift-argument-parser.git", from: "1.5.0"),
+        .package(url: "https://github.com/apple/swift-log.git", from: "1.0.0"),
         .package(url: "https://github.com/swiftlang/swift-testing.git", from: "0.12.0"),
         .package(path: "../containerization"),
     ],
@@ -15,6 +16,7 @@ let package = Package(
             dependencies: [
                 .product(name: "ArgumentParser", package: "swift-argument-parser"),
                 .product(name: "ContainerizationOCI", package: "containerization"),
+                .product(name: "Logging", package: "swift-log"),
             ],
             path: "Sources"
         ),

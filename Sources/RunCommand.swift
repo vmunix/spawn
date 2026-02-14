@@ -50,6 +50,8 @@ extension CCC {
         var verbose: Bool = false
 
         mutating func run() async throws {
+            if verbose { logger.logLevel = .debug }
+
             // Resolve agent profile
             guard let profile = AgentProfile.named(agent) else {
                 throw ValidationError("Unknown agent: \(agent). Use 'claude-code' or 'codex'.")
@@ -126,8 +128,7 @@ extension CCC {
                 workdir: workdir,
                 entrypoint: entrypoint,
                 cpus: cpus,
-                memory: memory,
-                verbose: verbose
+                memory: memory
             )
 
             if status != 0 {
