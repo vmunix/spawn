@@ -72,6 +72,14 @@ extension CCC {
                 imageOverride: image
             )
 
+            // Pre-flight: check if image exists locally
+            if !ImageChecker.imageExists(resolvedImage) {
+                let buildHint = image != nil
+                    ? "Pull or build the image first."
+                    : "Run 'spawn build \(resolvedToolchain.rawValue)' first."
+                throw ValidationError("Image '\(resolvedImage)' not found. \(buildHint)")
+            }
+
             // Resolve mounts
             let resolvedMounts = MountResolver.resolve(
                 target: path,
