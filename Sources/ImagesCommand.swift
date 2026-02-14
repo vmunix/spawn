@@ -11,48 +11,47 @@ extension Spawn {
         var all: Bool = false
 
         mutating func run() throws {
-            guard let root = ImageChecker.defaultStoreRoot else {
-                throw SpawnError.runtimeError(
-                    "Unable to resolve Application Support directory.")
-            }
-            let statePath = root.appendingPathComponent("state.json")
-            guard let data = try? Data(contentsOf: statePath) else {
-                throw SpawnError.runtimeError(
-                    "No image store found. Is the container system running? Try: container system start")
-            }
-
-            struct ImageEntry: Decodable {
-                let mediaType: String?
-                let digest: String
-                let size: Int64
-            }
-
-            guard let state = try? JSONDecoder().decode([String: ImageEntry].self, from: data) else {
-                throw SpawnError.runtimeError("Failed to parse image store at \(statePath.path)")
-            }
-
-            let images = state.keys.sorted().filter { all || $0.hasPrefix("spawn-") }
-
-            if images.isEmpty {
-                if all {
-                    print("No images found.")
-                } else {
-                    print("No spawn images found. Run 'spawn build' to create them.")
-                }
+            if all {
+                // Pass through to container CLI directly
+                let process = Process()
+                process.executableURL = URL(fileURLWithPath: ContainerRunner.containerPath)
+                process.arguments = ["image", "list"]
+                process.standardOutput = FileHandle.standardOutput
+                process.standardError = FileHandle.standardError
+                try process.run()
+                process.waitUntilExit()
                 return
             }
 
-            // Header
-            let nameWidth = max(images.map(\.count).max() ?? 0, 10)
-            print(
-                "NAME".padding(toLength: nameWidth + 2, withPad: " ", startingAt: 0)
-                    + "DIGEST")
-            for name in images {
-                let digest = state[name]?.digest ?? "unknown"
-                let shortDigest = String(digest.prefix(20)) + "..."
-                print(
-                    name.padding(toLength: nameWidth + 2, withPad: " ", startingAt: 0)
-                        + shortDigest)
+            // Filter to spawn-* images: capture output, filter lines, print
+            let process = Process()
+            process.executableURL = URL(fileURLWithPath: ContainerRunner.containerPath)
+            process.arguments = ["image", "list"]
+            let pipe = Pipe()
+            process.standardOutput = pipe
+            process.standardError = FileHandle.standardError
+            try process.run()
+
+            let data = pipe.fileHandleForReading.readDataToEndOfFile()
+            process.waitUntilExit()
+
+            guard let output = String(data: data, encoding: .utf8) else { return }
+            let lines = output.components(separatedBy: "\n")
+
+            // Print header + spawn-* lines
+            var found = false
+            for (index, line) in lines.enumerated() {
+                if index == 0 {
+                    print(line)
+                    continue
+                }
+                if line.hasPrefix("spawn-") {
+                    print(line)
+                    found = true
+                }
+            }
+            if !found {
+                print("No spawn images found. Run 'spawn build' to create them.")
             }
         }
     }
