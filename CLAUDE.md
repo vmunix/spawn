@@ -17,7 +17,7 @@ make test                            # Lint + run tests
 make lint                            # Run swift-format linter
 make format                          # Auto-fix formatting in-place
 make smoke                           # End-to-end smoke tests (cpp/go/rust fixtures in containers)
-make install                         # Install to /usr/local/bin
+make install                         # Install to ~/.local/bin
 ```
 
 ## Pre-commit
@@ -153,6 +153,12 @@ Uses [swift-log](https://github.com/apple/swift-log) with `StreamLogHandler.stan
 As spawn grows, adopt these patterns from the containerization library:
 - **Configuration structs with builder closures** for complex initialization (e.g., container config)
 - **Private state enums** with associated values for lifecycle management (e.g., VM states)
+
+## Distribution
+
+- **Homebrew (recommended):** `brew tap vmunix/tap && brew install spawn`. The formula lives in a dedicated tap repo at `github.com/vmunix/homebrew-tap` (local dev copy at `~/code/homebrew-tap/`). The formula builds from a GitHub release tarball with `swift build -c release --disable-sandbox` and installs the binary to the Homebrew prefix.
+- **From source:** `make install` builds a release binary and installs to `~/.local/bin/` (XDG-aligned, no sudo). The `PREFIX` variable can be overridden: `PREFIX=/usr/local make install`.
+- **Versioning:** The current version (`0.1.0`) is set in `CLI.swift` via `CommandConfiguration.version`. When cutting a release, tag the spawn repo (`git tag v0.1.0`), compute the tarball sha256, and update the formula in the tap repo.
 
 ## Migration Path
 

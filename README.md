@@ -27,10 +27,25 @@ That's it. spawn detects your project's language, picks the right container imag
 
 ## Install
 
+### Homebrew (recommended)
+
+```bash
+brew tap vmunix/tap
+brew install spawn
+```
+
+### From source
+
 ```bash
 git clone https://github.com/vmunix/spawn.git
 cd spawn
-make install    # builds release and copies to /usr/local/bin
+make install    # builds release and installs to ~/.local/bin
+```
+
+Ensure `~/.local/bin` is in your `PATH`. Add to your shell profile if needed:
+
+```bash
+export PATH="$HOME/.local/bin:$PATH"
 ```
 
 ## Quick start
@@ -161,10 +176,10 @@ Images are layered: toolchain images extend `spawn-base`, which provides Ubuntu 
 ## Development
 
 ```bash
-swift build              # Debug build
-swift test               # Run all 86 tests
-make test                # Lint + tests
-make smoke               # End-to-end tests against real containers
+make build              # Debug build
+make test               # Lint + tests
+make smoke              # End-to-end tests against real containers
+make install            # Install to ~/.local/bin
 ```
 
 ## License

@@ -1,4 +1,4 @@
-PREFIX ?= /usr/local
+PREFIX ?= $(HOME)/.local
 BINARY = spawn
 
 .PHONY: build install uninstall clean test lint format images smoke
