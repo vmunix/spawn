@@ -22,7 +22,7 @@ That's it. spawn detects your project's language, picks the right container imag
 ## Requirements
 
 - macOS 26+
-- Apple's [`container`](https://github.com/apple/containerization) CLI installed
+- Apple's [`container`](https://github.com/apple/containerization) CLI: `brew install container`
 - Swift 6.2+ (for building from source)
 
 ## Install
