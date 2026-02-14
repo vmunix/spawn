@@ -2,9 +2,17 @@
 
 Sandboxed AI coding agents on macOS. Run Claude Code or Codex in filesystem-isolated Linux containers with a single command.
 
+```bash
+cd ~/code/my-project
+spawn .           # Claude Code, auto-detected toolchain
+spawn . codex     # or Codex
+```
+
+That's it. spawn detects your project's language, picks the right container image, mounts your code, and launches the agent. Your files are read/write inside the container — everything else on your system is isolated.
+
 ## What it does
 
-`spawn` wraps Apple's [`container`](https://github.com/apple/containerization) CLI to launch AI coding agents in lightweight Linux VMs. Your project directory is mounted into the container — the agent can read and write your code, but nothing else on your system is accessible.
+`spawn` wraps Apple's [`container`](https://github.com/apple/containerization) CLI to launch AI coding agents in lightweight Linux VMs.
 
 - Auto-detects your project's toolchain (C++, Rust, Go) and picks the right container image
 - Mounts git config and SSH keys so the agent can commit and push
@@ -125,6 +133,20 @@ spawn . --env-file ~/secrets/env
 
 Environment variables are also loaded from `~/.config/spawn/env` (KEY=VALUE format).
 
+## Directory layout
+
+spawn follows the [XDG Base Directory](https://specifications.freedesktop.org/basedir-spec/latest/) convention:
+
+| Path | Purpose |
+|------|---------|
+| `~/.config/spawn/env` | Default environment variables (KEY=VALUE) |
+| `~/.local/state/spawn/<agent>/` | Agent credentials and session state |
+| `~/.local/state/spawn/git/` | Copied git config for container mounts |
+| `~/.local/state/spawn/ssh/` | Copied SSH keys for container mounts |
+| `~/.local/state/spawn/gh/` | Copied gh CLI config for container mounts |
+
+Respects `XDG_CONFIG_HOME` and `XDG_STATE_HOME` if set.
+
 ## Container images
 
 ```bash
@@ -140,7 +162,7 @@ Images are layered: toolchain images extend `spawn-base`, which provides Ubuntu 
 
 ```bash
 swift build              # Debug build
-swift test               # Run all 76 tests
+swift test               # Run all 86 tests
 make test                # Lint + tests
 make smoke               # End-to-end tests against real containers
 ```
