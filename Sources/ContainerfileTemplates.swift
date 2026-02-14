@@ -1,3 +1,5 @@
+import Foundation
+
 /// Embedded Containerfile strings for each toolchain, so `spawn build` works without repo files.
 enum ContainerfileTemplates: Sendable {
     /// The Go release version used in the go Containerfile template.
@@ -11,6 +13,95 @@ enum ContainerfileTemplates: Sendable {
         return "amd64"
         #endif
     }()
+
+    /// Git wrapper script that prompts before remote-write operations in safe mode.
+    private static let gitGuard = #"""
+        #!/bin/bash
+        REAL_GIT=/usr/bin/git
+
+        # Pass through immediately if safe mode is not active
+        if [[ "${SPAWN_SAFE_MODE:-}" != "1" ]]; then
+            exec "$REAL_GIT" "$@"
+        fi
+
+        # Find the actual subcommand by skipping option flags
+        subcmd=""
+        i=1
+        while [[ $i -le $# ]]; do
+            arg="${!i}"
+            case "$arg" in
+                -c|--config|-C)
+                    ((i+=2))
+                    ;;
+                -*)
+                    ((i++))
+                    ;;
+                *)
+                    subcmd="$arg"
+                    break
+                    ;;
+            esac
+        done
+
+        case "$subcmd" in
+            push)
+                printf '\033[1;33mspawn:\033[0m agent wants to run: git %s\n' "$*" >/dev/tty 2>/dev/null
+                printf 'allow? [y/N] ' >/dev/tty 2>/dev/null
+                read -r answer </dev/tty 2>/dev/null || { echo "spawn: git push blocked — safe mode requires a TTY for approval" >&2; exit 1; }
+                [[ "$answer" =~ ^[Yy]$ ]] || { echo "spawn: blocked by safe mode" >&2; exit 1; }
+                ;;
+            remote)
+                next_i=$((i + 1))
+                remote_sub="${!next_i}"
+                case "$remote_sub" in
+                    add|set-url)
+                        printf '\033[1;33mspawn:\033[0m agent wants to run: git %s\n' "$*" >/dev/tty 2>/dev/null
+                        printf 'allow? [y/N] ' >/dev/tty 2>/dev/null
+                        read -r answer </dev/tty 2>/dev/null || { echo "spawn: git remote $remote_sub blocked — safe mode requires a TTY for approval" >&2; exit 1; }
+                        [[ "$answer" =~ ^[Yy]$ ]] || { echo "spawn: blocked by safe mode" >&2; exit 1; }
+                        ;;
+                esac
+                ;;
+        esac
+
+        exec "$REAL_GIT" "$@"
+        """#
+
+    /// GitHub CLI wrapper script that prompts before mutating operations in safe mode.
+    private static let ghGuard = #"""
+        #!/bin/bash
+        REAL_GH=/usr/bin/gh
+
+        # Pass through immediately if safe mode is not active
+        if [[ "${SPAWN_SAFE_MODE:-}" != "1" ]]; then
+            exec "$REAL_GH" "$@"
+        fi
+
+        prompt_user() {
+            printf '\033[1;33mspawn:\033[0m agent wants to run: gh %s\n' "$*" >/dev/tty 2>/dev/null
+            printf 'allow? [y/N] ' >/dev/tty 2>/dev/null
+            read -r answer </dev/tty 2>/dev/null || { echo "spawn: gh command blocked — safe mode requires a TTY for approval" >&2; exit 1; }
+            [[ "$answer" =~ ^[Yy]$ ]] || { echo "spawn: blocked by safe mode" >&2; exit 1; }
+        }
+
+        case "${1:-}" in
+            pr)
+                case "${2:-}" in
+                    create|merge|close) prompt_user "$@" ;;
+                esac
+                ;;
+            issue)
+                case "${2:-}" in
+                    create|close) prompt_user "$@" ;;
+                esac
+                ;;
+            release|repo)
+                prompt_user "$@"
+                ;;
+        esac
+
+        exec "$REAL_GH" "$@"
+        """#
 
     /// Returns the Containerfile content for the given toolchain.
     static func content(for toolchain: Toolchain) -> String {
@@ -41,6 +132,14 @@ enum ContainerfileTemplates: Sendable {
                 > /etc/apt/sources.list.d/github-cli.list \\
             && apt-get update && apt-get install -y --no-install-recommends gh \\
             && rm -rf /var/lib/apt/lists/*
+
+        # Safe-mode wrapper scripts for git/gh (activated by SPAWN_SAFE_MODE=1)
+        RUN mkdir -p /usr/local/lib/spawn \\
+            && echo '\(Data(gitGuard.utf8).base64EncodedString())' | base64 -d > /usr/local/lib/spawn/git-guard.sh \\
+            && echo '\(Data(ghGuard.utf8).base64EncodedString())' | base64 -d > /usr/local/lib/spawn/gh-guard.sh \\
+            && chmod +x /usr/local/lib/spawn/git-guard.sh /usr/local/lib/spawn/gh-guard.sh \\
+            && ln -sf /usr/local/lib/spawn/git-guard.sh /usr/local/bin/git \\
+            && ln -sf /usr/local/lib/spawn/gh-guard.sh /usr/local/bin/gh
 
         # Codex (OpenAI)
         RUN npm install -g @openai/codex
