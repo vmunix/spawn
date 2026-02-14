@@ -1,0 +1,7 @@
+title: spawn
+description: Sandboxed AI coding agents on macOS
+remote_theme: just-the-docs/just-the-docs
+url: https://vmunix.github.io/spawn
+
+exclude:
+  - plans/
