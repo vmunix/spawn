@@ -6,6 +6,7 @@ let package = Package(
     platforms: [.macOS(.v15)],
     dependencies: [
         .package(url: "https://github.com/apple/swift-argument-parser.git", from: "1.5.0"),
+        .package(url: "https://github.com/swiftlang/swift-testing.git", from: "0.12.0"),
     ],
     targets: [
         .executableTarget(
@@ -17,17 +18,11 @@ let package = Package(
         ),
         .testTarget(
             name: "cccTests",
-            dependencies: ["ccc"],
-            path: "Tests",
-            swiftSettings: [
-                .unsafeFlags(["-F", "/Library/Developer/CommandLineTools/Library/Developer/Frameworks"]),
+            dependencies: [
+                "ccc",
+                .product(name: "Testing", package: "swift-testing"),
             ],
-            linkerSettings: [
-                .unsafeFlags(["-F", "/Library/Developer/CommandLineTools/Library/Developer/Frameworks",
-                              "-framework", "Testing",
-                              "-Xlinker", "-rpath",
-                              "-Xlinker", "/Library/Developer/CommandLineTools/Library/Developer/Frameworks"]),
-            ]
+            path: "Tests"
         ),
     ]
 )
