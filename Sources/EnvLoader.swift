@@ -22,8 +22,7 @@ enum EnvLoader {
             var value = String(trimmed[trimmed.index(after: eqIndex)...])
                 .trimmingCharacters(in: .whitespaces)
             // Strip surrounding quotes
-            if (value.hasPrefix("\"") && value.hasSuffix("\"")) ||
-               (value.hasPrefix("'") && value.hasSuffix("'")) {
+            if (value.hasPrefix("\"") && value.hasSuffix("\"")) || (value.hasPrefix("'") && value.hasSuffix("'")) {
                 value = String(value.dropFirst().dropLast())
             }
             env[key] = value

@@ -1,4 +1,5 @@
 import Testing
+
 @testable import spawn
 
 @Test func detectsRustFromCargoToml() throws {
@@ -36,7 +37,7 @@ import Testing
         "Cargo.toml": "",
         ".devcontainer/devcontainer.json": """
         {"image": "mcr.microsoft.com/devcontainers/go:1.23"}
-        """
+        """,
     ])
     let result = ToolchainDetector.detect(in: dir)
     #expect(result == .go)
@@ -48,7 +49,7 @@ import Testing
         ".spawn.toml": """
         [toolchain]
         base = "cpp"
-        """
+        """,
     ])
     let result = ToolchainDetector.detect(in: dir)
     #expect(result == .cpp)

@@ -40,11 +40,12 @@ enum MountResolver {
                 let dest = gitDir.appendingPathComponent(".gitconfig")
                 try? fm.removeItem(at: dest)
                 try? fm.copyItem(at: gitconfig, to: dest)
-                mounts.append(Mount(
-                    hostPath: gitDir.path,
-                    guestPath: "/home/coder/.gitconfig-dir",
-                    readOnly: true
-                ))
+                mounts.append(
+                    Mount(
+                        hostPath: gitDir.path,
+                        guestPath: "/home/coder/.gitconfig-dir",
+                        readOnly: true
+                    ))
             }
 
             let sshDir = home.appendingPathComponent(".ssh")
@@ -53,11 +54,12 @@ enum MountResolver {
                 // Fresh copy each run to pick up key changes
                 try? fm.removeItem(at: sshCopy)
                 try? fm.copyItem(at: sshDir, to: sshCopy)
-                mounts.append(Mount(
-                    hostPath: sshCopy.path,
-                    guestPath: "/home/coder/.ssh",
-                    readOnly: true
-                ))
+                mounts.append(
+                    Mount(
+                        hostPath: sshCopy.path,
+                        guestPath: "/home/coder/.ssh",
+                        readOnly: true
+                    ))
             }
         }
 
@@ -75,26 +77,29 @@ enum MountResolver {
             // ~/.claude-state/ and the Containerfile symlinks ~/.claude.json into it.
             let claudeDir = agentStateDir.appendingPathComponent("claude")
             try? FileManager.default.createDirectory(at: claudeDir, withIntermediateDirectories: true)
-            mounts.append(Mount(
-                hostPath: claudeDir.path,
-                guestPath: "/home/coder/.claude",
-                readOnly: false
-            ))
+            mounts.append(
+                Mount(
+                    hostPath: claudeDir.path,
+                    guestPath: "/home/coder/.claude",
+                    readOnly: false
+                ))
             let claudeStateDir = agentStateDir.appendingPathComponent("claude-state")
             try? FileManager.default.createDirectory(at: claudeStateDir, withIntermediateDirectories: true)
-            mounts.append(Mount(
-                hostPath: claudeStateDir.path,
-                guestPath: "/home/coder/.claude-state",
-                readOnly: false
-            ))
+            mounts.append(
+                Mount(
+                    hostPath: claudeStateDir.path,
+                    guestPath: "/home/coder/.claude-state",
+                    readOnly: false
+                ))
         case "codex":
             let codexDir = agentStateDir.appendingPathComponent("codex")
             try? FileManager.default.createDirectory(at: codexDir, withIntermediateDirectories: true)
-            mounts.append(Mount(
-                hostPath: codexDir.path,
-                guestPath: "/home/coder/.codex",
-                readOnly: false
-            ))
+            mounts.append(
+                Mount(
+                    hostPath: codexDir.path,
+                    guestPath: "/home/coder/.codex",
+                    readOnly: false
+                ))
         default:
             break
         }

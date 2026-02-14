@@ -9,22 +9,24 @@ enum ToolchainDetector {
         // Priority 1: .spawn.toml
         let spawnToml = directory.appendingPathComponent(".spawn.toml")
         if fm.fileExists(atPath: spawnToml.path),
-           let toolchain = parseSpawnToml(at: spawnToml) {
+            let toolchain = parseSpawnToml(at: spawnToml)
+        {
             return toolchain
         }
 
         // Priority 2: .devcontainer/devcontainer.json
-        let devcontainer = directory
+        let devcontainer =
+            directory
             .appendingPathComponent(".devcontainer")
             .appendingPathComponent("devcontainer.json")
         if fm.fileExists(atPath: devcontainer.path),
-           let toolchain = parseDevcontainer(at: devcontainer) {
+            let toolchain = parseDevcontainer(at: devcontainer)
+        {
             return toolchain
         }
 
         // Priority 3: Dockerfile / Containerfile
-        if fm.fileExists(atPath: directory.appendingPathComponent("Dockerfile").path) ||
-           fm.fileExists(atPath: directory.appendingPathComponent("Containerfile").path) {
+        if fm.fileExists(atPath: directory.appendingPathComponent("Dockerfile").path) || fm.fileExists(atPath: directory.appendingPathComponent("Containerfile").path) {
             return nil
         }
 
@@ -57,7 +59,8 @@ enum ToolchainDetector {
             // Match "base = ..." precisely
             let normalized = trimmed.replacingOccurrences(of: " ", with: "")
             if normalized.hasPrefix("base=") {
-                let value = trimmed
+                let value =
+                    trimmed
                     .split(separator: "=", maxSplits: 1).last?
                     .trimmingCharacters(in: .whitespaces)
                     .trimmingCharacters(in: CharacterSet(charactersIn: "\"'"))

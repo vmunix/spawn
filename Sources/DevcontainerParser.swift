@@ -9,7 +9,8 @@ struct DevcontainerConfig: Sendable {
     /// Returns nil if the file can't be parsed
     static func parse(at url: URL) -> DevcontainerConfig? {
         guard let data = try? Data(contentsOf: url),
-              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+        else {
             return nil
         }
 
@@ -29,7 +30,7 @@ struct DevcontainerConfig: Sendable {
         } else if let features = json["features"] as? [String: Any] {
             toolchain = inferToolchainFromFeatures(features)
         } else if dockerfile != nil {
-            toolchain = nil // signal to build the Dockerfile
+            toolchain = nil  // signal to build the Dockerfile
         } else {
             toolchain = .base
         }

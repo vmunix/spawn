@@ -5,7 +5,7 @@ enum ContainerRunner {
         for path in ["/opt/homebrew/bin/container", "/usr/local/bin/container"] {
             if FileManager.default.fileExists(atPath: path) { return path }
         }
-        return "container" // hope it's on PATH
+        return "container"  // hope it's on PATH
     }()
 
     static func buildArgs(
@@ -32,7 +32,8 @@ enum ContainerRunner {
 
         // Mounts
         for mount in mounts {
-            let spec = mount.readOnly
+            let spec =
+                mount.readOnly
                 ? "\(mount.hostPath):\(mount.guestPath):ro"
                 : "\(mount.hostPath):\(mount.guestPath)"
             args += ["--volume", spec]
@@ -81,7 +82,7 @@ enum ContainerRunner {
         // raw mode, and proper interactive I/O). No intermediary process.
         if isatty(STDIN_FILENO) != 0 {
             let cArgs = [containerPath] + args
-            let cStrings = cArgs.map { strdup($0)! }
+            let cStrings: [UnsafeMutablePointer<CChar>?] = cArgs.map { strdup($0) }
             let argv = cStrings + [nil]
             execv(containerPath, argv)
             // execv only returns on failure

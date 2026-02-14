@@ -1,11 +1,12 @@
 import Testing
+
 @testable import spawn
 
 @Test func parsesEnvFile() {
     let content = """
-    ANTHROPIC_API_KEY=sk-ant-123
-    OPENAI_API_KEY=sk-456
-    """
+        ANTHROPIC_API_KEY=sk-ant-123
+        OPENAI_API_KEY=sk-456
+        """
     let env = EnvLoader.parse(content)
     #expect(env["ANTHROPIC_API_KEY"] == "sk-ant-123")
     #expect(env["OPENAI_API_KEY"] == "sk-456")
@@ -13,12 +14,12 @@ import Testing
 
 @Test func ignoresCommentsAndEmptyLines() {
     let content = """
-    # This is a comment
-    KEY=value
+        # This is a comment
+        KEY=value
 
-    # Another comment
-    KEY2=value2
-    """
+        # Another comment
+        KEY2=value2
+        """
     let env = EnvLoader.parse(content)
     #expect(env.count == 2)
     #expect(env["KEY"] == "value")
@@ -26,9 +27,9 @@ import Testing
 
 @Test func handlesQuotedValues() {
     let content = """
-    KEY="value with spaces"
-    KEY2='single quoted'
-    """
+        KEY="value with spaces"
+        KEY2='single quoted'
+        """
     let env = EnvLoader.parse(content)
     #expect(env["KEY"] == "value with spaces")
     #expect(env["KEY2"] == "single quoted")

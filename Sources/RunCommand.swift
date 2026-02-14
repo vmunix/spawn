@@ -74,7 +74,8 @@ extension CCC {
 
             // Pre-flight: check if image exists locally
             if !ImageChecker.imageExists(resolvedImage) {
-                let buildHint = image != nil
+                let buildHint =
+                    image != nil
                     ? "Pull or build the image first."
                     : "Run 'spawn build \(resolvedToolchain.rawValue)' first."
                 throw ValidationError("Image '\(resolvedImage)' not found. \(buildHint)")

@@ -1,12 +1,18 @@
 PREFIX ?= /usr/local
 BINARY = spawn
 
-.PHONY: build install uninstall clean test images
+.PHONY: build install uninstall clean test lint format images
 
 build:
 	swift build -c release
 
-test:
+lint:
+	swift format lint --strict -r Sources Tests
+
+format:
+	swift format format --in-place -r Sources Tests
+
+test: lint
 	swift test
 
 install: build

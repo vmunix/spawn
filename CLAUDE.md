@@ -7,15 +7,19 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ```bash
 swift build                          # Debug build
 swift build -c release               # Release build
-swift test                           # Run all 43 tests
+swift test                           # Run all tests
 swift test --filter ToolchainDetector  # Run tests in one file
 swift test --filter "detectsRust"    # Run a single test by name
 swift run spawn .                      # Run from source (defaults to claude-code agent)
 swift run spawn . codex --verbose      # Run with verbose output showing container command
 make build                           # Release build
-make test                            # Run tests
+make test                            # Lint + run tests
+make lint                            # Run swift-format linter
+make format                          # Auto-fix formatting in-place
 make install                         # Install to /usr/local/bin
 make images                          # Build all container images via Apple's container CLI
+swift format lint --strict -r Sources Tests  # Lint all source files
+swift format format --in-place -r Sources Tests  # Auto-fix formatting
 ```
 
 ## Architecture
