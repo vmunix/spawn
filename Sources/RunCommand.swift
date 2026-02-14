@@ -49,6 +49,9 @@ extension Spawn {
         @Flag(name: .long, help: "Show container commands.")
         var verbose: Bool = false
 
+        @Flag(name: .long, help: "Full auto mode — skip all permission gates.")
+        var yolo: Bool = false
+
         mutating func run() async throws {
             if verbose { logger.logLevel = .debug }
 
@@ -104,6 +107,13 @@ extension Spawn {
                 print("Detected toolchain: \(resolvedToolchain.rawValue)")
             }
 
+            // Print permission mode
+            if yolo {
+                print("Yolo mode: all operations unrestricted")
+            } else {
+                print("Safe mode: remote git operations require approval (use --yolo to disable)")
+            }
+
             // Resolve image
             let resolvedImage = try ImageResolver.resolve(
                 toolchain: resolvedToolchain,
@@ -152,12 +162,17 @@ extension Spawn {
                 environment[parsed.key] = parsed.value
             }
 
+            // Safe mode: activate wrapper scripts inside the container
+            if !yolo {
+                environment["SPAWN_SAFE_MODE"] = "1"
+            }
+
             // Note: we don't validate API keys here — agents support OAuth login
             // and will prompt the user to authenticate if no API key is set.
             // Credentials are persisted in $XDG_STATE_HOME/spawn/<agent>/ across runs.
 
             // Determine entrypoint
-            let entrypoint = shell ? ["/bin/bash"] : profile.yoloEntrypoint
+            let entrypoint = shell ? ["/bin/bash"] : (yolo ? profile.yoloEntrypoint : profile.safeEntrypoint)
 
             // Working directory
             let workdir = "/workspace/\(path.lastPathComponent)"
