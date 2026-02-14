@@ -114,6 +114,13 @@ extension Spawn {
                 print("Safe mode: remote git operations require approval (use --yolo to disable)")
             }
 
+            // Seed Claude Code safe-mode permissions
+            if !yolo, agent == "claude-code" {
+                let claudeSettingsDir = Paths.stateDir.appendingPathComponent(agent)
+                    .appendingPathComponent("claude")
+                SettingsSeeder.seed(settingsDir: claudeSettingsDir)
+            }
+
             // Resolve image
             let resolvedImage = try ImageResolver.resolve(
                 toolchain: resolvedToolchain,
