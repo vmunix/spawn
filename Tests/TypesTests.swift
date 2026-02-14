@@ -1,5 +1,5 @@
 import Testing
-@testable import ccc
+@testable import spawn
 
 @Test func mountFromHostPath() {
     let mount = Mount(hostPath: "/Users/me/code/project", readOnly: false)

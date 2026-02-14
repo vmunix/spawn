@@ -1,4 +1,4 @@
-FROM ccc-base:latest
+FROM spawn-base:latest
 
 USER root
 ARG GO_VERSION=1.23.6

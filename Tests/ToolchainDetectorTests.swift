@@ -1,5 +1,5 @@
 import Testing
-@testable import ccc
+@testable import spawn
 
 @Test func detectsRustFromCargoToml() throws {
     let dir = try makeTempDir(files: ["Cargo.toml": ""])
@@ -42,10 +42,10 @@ import Testing
     #expect(result == .go)
 }
 
-@Test func prefersCccTomlOverAll() throws {
+@Test func prefersSpawnTomlOverAll() throws {
     let dir = try makeTempDir(files: [
         "Cargo.toml": "",
-        ".ccc.toml": """
+        ".spawn.toml": """
         [toolchain]
         base = "cpp"
         """
@@ -60,9 +60,9 @@ import Testing
     #expect(result == nil)
 }
 
-@Test func cccTomlIgnoresOtherSections() throws {
+@Test func spawnTomlIgnoresOtherSections() throws {
     let dir = try makeTempDir(files: [
-        ".ccc.toml": """
+        ".spawn.toml": """
         [agent]
         base_url = "https://example.com"
 

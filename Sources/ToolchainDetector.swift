@@ -2,14 +2,14 @@ import Foundation
 
 enum ToolchainDetector {
     /// Returns nil when a Dockerfile/Containerfile is found (caller should build it directly).
-    /// Returns a Toolchain when a ccc-* image variant should be used.
+    /// Returns a Toolchain when a spawn-* image variant should be used.
     static func detect(in directory: URL) -> Toolchain? {
         let fm = FileManager.default
 
-        // Priority 1: .ccc.toml
-        let cccToml = directory.appendingPathComponent(".ccc.toml")
-        if fm.fileExists(atPath: cccToml.path),
-           let toolchain = parseCccToml(at: cccToml) {
+        // Priority 1: .spawn.toml
+        let spawnToml = directory.appendingPathComponent(".spawn.toml")
+        if fm.fileExists(atPath: spawnToml.path),
+           let toolchain = parseSpawnToml(at: spawnToml) {
             return toolchain
         }
 
@@ -43,7 +43,7 @@ enum ToolchainDetector {
         return .base
     }
 
-    private static func parseCccToml(at url: URL) -> Toolchain? {
+    private static func parseSpawnToml(at url: URL) -> Toolchain? {
         guard let content = try? String(contentsOf: url, encoding: .utf8) else { return nil }
         var inToolchainSection = false
         for line in content.components(separatedBy: .newlines) {

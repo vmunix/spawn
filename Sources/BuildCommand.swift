@@ -26,12 +26,12 @@ extension CCC {
             }
 
             for tc in toolchains {
-                print("Building ccc-\(tc.rawValue)...")
-                let imageName = "ccc-\(tc.rawValue):latest"
+                print("Building spawn-\(tc.rawValue)...")
+                let imageName = "spawn-\(tc.rawValue):latest"
 
                 // Write embedded Containerfile to a temp file
                 let tmpContainerfile = FileManager.default.temporaryDirectory
-                    .appendingPathComponent("ccc-Containerfile-\(tc.rawValue)")
+                    .appendingPathComponent("spawn-Containerfile-\(tc.rawValue)")
                 try ContainerfileTemplates.content(for: tc)
                     .write(to: tmpContainerfile, atomically: true, encoding: .utf8)
 

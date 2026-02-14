@@ -1,4 +1,4 @@
-FROM ccc-base:latest
+FROM spawn-base:latest
 
 USER root
 RUN apt-get update && apt-get install -y --no-install-recommends \

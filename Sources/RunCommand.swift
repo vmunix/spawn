@@ -101,7 +101,7 @@ extension CCC {
 
             // Note: we don't validate API keys here — agents support OAuth login
             // and will prompt the user to authenticate if no API key is set.
-            // Credentials are persisted in ~/.ccc/state/<agent>/ across runs.
+            // Credentials are persisted in ~/.spawn/state/<agent>/ across runs.
 
             // Determine entrypoint
             let entrypoint = shell ? ["/bin/bash"] : profile.entrypoint

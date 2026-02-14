@@ -16,14 +16,14 @@ func makeTempDir(files: [String: String]) throws -> URL {
         if let contents = try? FileManager.default.contentsOfDirectory(
             at: tmpDir, includingPropertiesForKeys: nil
         ) {
-            for item in contents where item.lastPathComponent.hasPrefix("ccc-test-") {
+            for item in contents where item.lastPathComponent.hasPrefix("spawn-test-") {
                 try? FileManager.default.removeItem(at: item)
             }
         }
     }
 
     let base = URL(fileURLWithPath: NSTemporaryDirectory())
-        .appendingPathComponent("ccc-test-\(UUID().uuidString)")
+        .appendingPathComponent("spawn-test-\(UUID().uuidString)")
     try FileManager.default.createDirectory(at: base, withIntermediateDirectories: true)
     for (path, content) in files {
         let fileURL = base.appendingPathComponent(path)

@@ -1,4 +1,4 @@
-FROM ccc-base:latest
+FROM spawn-base:latest
 
 USER root
 RUN su - coder -c "curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y"

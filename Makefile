@@ -1,5 +1,5 @@
 PREFIX ?= /usr/local
-BINARY = ccc
+BINARY = spawn
 
 .PHONY: build install uninstall clean test images
 
@@ -20,7 +20,7 @@ clean:
 	swift package clean
 
 images:
-	container build -t ccc-base:latest -f Images/base/Containerfile .
-	container build -t ccc-cpp:latest -f Images/cpp/Containerfile .
-	container build -t ccc-rust:latest -f Images/rust/Containerfile .
-	container build -t ccc-go:latest -f Images/go/Containerfile .
+	container build -t spawn-base:latest -f Images/base/Containerfile .
+	container build -t spawn-cpp:latest -f Images/cpp/Containerfile .
+	container build -t spawn-rust:latest -f Images/rust/Containerfile .
+	container build -t spawn-go:latest -f Images/go/Containerfile .

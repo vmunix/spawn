@@ -1,5 +1,5 @@
 import Testing
-@testable import ccc
+@testable import spawn
 
 @Test func resolvesTargetDirectory() {
     let mounts = MountResolver.resolve(

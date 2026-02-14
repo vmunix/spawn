@@ -4,7 +4,7 @@ enum MountResolver {
     /// Directory on the host that persists agent credentials across container runs.
     static let stateDir: URL = {
         let dir = FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent(".ccc")
+            .appendingPathComponent(".spawn")
             .appendingPathComponent("state")
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         return dir
@@ -35,7 +35,7 @@ enum MountResolver {
         // Git/SSH mounts
         // VirtioFS preserves host file ownership/permissions, so files owned by the
         // macOS user (uid 501) with 600 permissions are unreadable by the container's
-        // coder user (uid 1001). We copy to ~/.ccc/state/ where we control permissions,
+        // coder user (uid 1001). We copy to ~/.spawn/state/ where we control permissions,
         // and mount the copies. The Containerfile has symlinks from the expected paths
         // into these mount points.
         if includeGit {
@@ -70,7 +70,7 @@ enum MountResolver {
             }
         }
 
-        // Persistent agent credential state (~/.ccc/state/<agent>/ → /home/coder/.<agent-config-dir>)
+        // Persistent agent credential state (~/.spawn/state/<agent>/ → /home/coder/.<agent-config-dir>)
         // This lets OAuth tokens survive container restarts so users only auth once.
         let agentStateDir = stateDir.appendingPathComponent(agent)
         try? FileManager.default.createDirectory(at: agentStateDir, withIntermediateDirectories: true)

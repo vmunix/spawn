@@ -1,5 +1,5 @@
 import Testing
-@testable import ccc
+@testable import spawn
 
 @Test func fullPipelineProducesCorrectArguments() throws {
     let target = try makeTempDir(files: ["Cargo.toml": ""])
@@ -10,7 +10,7 @@ import Testing
 
     // Resolve image
     let image = ImageResolver.resolve(toolchain: toolchain ?? .base, imageOverride: nil)
-    #expect(image == "ccc-rust:latest")
+    #expect(image == "spawn-rust:latest")
 
     // Resolve mounts
     let mounts = MountResolver.resolve(
@@ -30,7 +30,7 @@ import Testing
     )
 
     #expect(args.first == "run")
-    #expect(args.contains("ccc-rust:latest"))
+    #expect(args.contains("spawn-rust:latest"))
     #expect(args.contains("claude"))
     #expect(args.contains("--dangerously-skip-permissions"))
 }
@@ -42,7 +42,7 @@ import Testing
     #expect(toolchain == .go)
 
     let image = ImageResolver.resolve(toolchain: toolchain ?? .base, imageOverride: nil)
-    #expect(image == "ccc-go:latest")
+    #expect(image == "spawn-go:latest")
 
     let args = ContainerRunner.buildArgs(
         image: image,
@@ -54,7 +54,7 @@ import Testing
         memory: "4g"
     )
 
-    #expect(args.contains("ccc-go:latest"))
+    #expect(args.contains("spawn-go:latest"))
     #expect(args.contains("codex"))
     #expect(args.contains { $0.contains("--cpus") })
 }

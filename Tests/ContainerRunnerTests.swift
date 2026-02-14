@@ -1,9 +1,9 @@
 import Testing
-@testable import ccc
+@testable import spawn
 
 @Test func buildsBasicRunArguments() {
     let args = ContainerRunner.buildArgs(
-        image: "ccc-base:latest",
+        image: "spawn-base:latest",
         mounts: [Mount(hostPath: "/Users/me/code/project", readOnly: false)],
         env: ["KEY": "value"],
         workdir: "/workspace/project",
@@ -14,13 +14,13 @@ import Testing
 
     #expect(args.contains("run"))
     #expect(args.contains("--rm"))
-    #expect(args.contains("ccc-base:latest"))
+    #expect(args.contains("spawn-base:latest"))
     #expect(args.contains("claude"))
 }
 
 @Test func includesAllMounts() {
     let args = ContainerRunner.buildArgs(
-        image: "ccc-rust:latest",
+        image: "spawn-rust:latest",
         mounts: [
             Mount(hostPath: "/code/project", readOnly: false),
             Mount(hostPath: "/code/lib", readOnly: true),
@@ -39,7 +39,7 @@ import Testing
 
 @Test func includesEnvVars() {
     let args = ContainerRunner.buildArgs(
-        image: "ccc-base:latest",
+        image: "spawn-base:latest",
         mounts: [],
         env: ["ANTHROPIC_API_KEY": "sk-123", "FOO": "bar"],
         workdir: "/workspace/test",
@@ -54,7 +54,7 @@ import Testing
 
 @Test func shellModeOverridesEntrypoint() {
     let args = ContainerRunner.buildArgs(
-        image: "ccc-base:latest",
+        image: "spawn-base:latest",
         mounts: [],
         env: [:],
         workdir: "/workspace/test",

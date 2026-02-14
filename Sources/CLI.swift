@@ -3,7 +3,7 @@ import ArgumentParser
 @main
 struct CCC: AsyncParsableCommand {
     static let configuration = CommandConfiguration(
-        commandName: "ccc",
+        commandName: "spawn",
         abstract: "Sandboxed AI coding agents on macOS.",
         version: "0.1.0",
         subcommands: [Run.self, Build.self, List.self, Stop.self, Exec.self],

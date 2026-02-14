@@ -1,14 +1,14 @@
 import Testing
-@testable import ccc
+@testable import spawn
 
 @Test func resolvesImageFromToolchain() {
     let image = ImageResolver.resolve(toolchain: .rust, imageOverride: nil)
-    #expect(image == "ccc-rust:latest")
+    #expect(image == "spawn-rust:latest")
 }
 
 @Test func resolvesBaseImage() {
     let image = ImageResolver.resolve(toolchain: .base, imageOverride: nil)
-    #expect(image == "ccc-base:latest")
+    #expect(image == "spawn-base:latest")
 }
 
 @Test func overrideWins() {
@@ -18,5 +18,5 @@ import Testing
 
 @Test func cppImage() {
     let image = ImageResolver.resolve(toolchain: .cpp, imageOverride: nil)
-    #expect(image == "ccc-cpp:latest")
+    #expect(image == "spawn-cpp:latest")
 }

@@ -44,7 +44,7 @@ enum ContainerfileTemplates {
     """
 
     static let cpp = """
-    FROM ccc-base:latest
+    FROM spawn-base:latest
 
     RUN apt-get update && apt-get install -y --no-install-recommends \\
         clang clang-format clang-tidy \\
@@ -54,7 +54,7 @@ enum ContainerfileTemplates {
     """
 
     static let rust = """
-    FROM ccc-base:latest
+    FROM spawn-base:latest
 
     USER root
     RUN su - coder -c "curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y"
@@ -63,7 +63,7 @@ enum ContainerfileTemplates {
     """
 
     static let go = """
-    FROM ccc-base:latest
+    FROM spawn-base:latest
 
     USER root
     ARG GO_VERSION=1.23.6
