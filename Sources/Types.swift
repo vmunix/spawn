@@ -41,16 +41,16 @@ struct AgentProfile: Sendable {
 
     static let claudeCode = AgentProfile(
         name: "claude-code",
-        entrypoint: ["claude"],
-        requiredEnvVars: ["ANTHROPIC_API_KEY"],
+        entrypoint: ["claude", "--dangerously-skip-permissions"],
+        requiredEnvVars: [],
         defaultCPUs: 4,
         defaultMemory: "8g"
     )
 
     static let codex = AgentProfile(
         name: "codex",
-        entrypoint: ["codex"],
-        requiredEnvVars: ["OPENAI_API_KEY"],
+        entrypoint: ["codex", "--full-auto"],
+        requiredEnvVars: [],
         defaultCPUs: 4,
         defaultMemory: "8g"
     )

@@ -14,23 +14,15 @@ import Testing
 
     // Resolve mounts
     let mounts = MountResolver.resolve(
-        target: target, additional: [], readOnly: [], includeGit: false
+        target: target, additional: [], readOnly: [], includeGit: false, agent: "claude-code"
     )
-    #expect(mounts.count == 1)
     #expect(mounts[0].guestPath.hasPrefix("/workspace/"))
-
-    // Load env
-    let env = ["ANTHROPIC_API_KEY": "sk-test"]
-    let missing = EnvLoader.validateRequired(
-        AgentProfile.claudeCode.requiredEnvVars, in: env
-    )
-    #expect(missing.isEmpty)
 
     // Build args
     let args = ContainerRunner.buildArgs(
         image: image,
         mounts: mounts,
-        env: env,
+        env: [:],
         workdir: "/workspace/\(target.lastPathComponent)",
         entrypoint: AgentProfile.claudeCode.entrypoint,
         cpus: 4,
@@ -40,7 +32,7 @@ import Testing
     #expect(args.first == "run")
     #expect(args.contains("ccc-rust:latest"))
     #expect(args.contains("claude"))
-    #expect(args.contains { $0.contains("ANTHROPIC_API_KEY=sk-test") })
+    #expect(args.contains("--dangerously-skip-permissions"))
 }
 
 @Test func fullPipelineWithGoProject() throws {
@@ -55,7 +47,7 @@ import Testing
     let args = ContainerRunner.buildArgs(
         image: image,
         mounts: [Mount(hostPath: target.path, readOnly: false)],
-        env: ["OPENAI_API_KEY": "sk-test"],
+        env: [:],
         workdir: "/workspace/\(target.lastPathComponent)",
         entrypoint: AgentProfile.codex.entrypoint,
         cpus: 2,

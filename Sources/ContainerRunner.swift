@@ -19,6 +19,13 @@ enum ContainerRunner {
     ) -> [String] {
         var args = ["run", "--rm", "-i"]
 
+        // Allocate a TTY when stdin is a real terminal.
+        // This is required for interactive use (unbuffered output, line editing).
+        // Apple's container CLI v0.9.0 requires a real host TTY for -t to work.
+        if isatty(STDIN_FILENO) != 0 {
+            args.append("-t")
+        }
+
         // Resources
         args += ["--cpus", "\(cpus)"]
         args += ["--memory", "\(memory)"]
@@ -69,6 +76,20 @@ enum ContainerRunner {
             FileHandle.standardError.write(Data("+ \(cmd)\n".utf8))
         }
 
+        // When stdin is a TTY, replace our process with `container` via execv.
+        // This gives the container CLI direct terminal access (needed for -t flag,
+        // raw mode, and proper interactive I/O). No intermediary process.
+        if isatty(STDIN_FILENO) != 0 {
+            let cArgs = [containerPath] + args
+            let cStrings = cArgs.map { strdup($0)! }
+            let argv = cStrings + [nil]
+            execv(containerPath, argv)
+            // execv only returns on failure
+            perror("execv")
+            return 1
+        }
+
+        // Non-TTY path: use Foundation.Process with signal forwarding
         let process = Process()
         process.executableURL = URL(fileURLWithPath: containerPath)
         process.arguments = args

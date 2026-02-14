@@ -77,7 +77,8 @@ extension CCC {
                 target: path,
                 additional: mount,
                 readOnly: readOnlyMounts,
-                includeGit: !noGit
+                includeGit: !noGit,
+                agent: agent
             )
 
             // Load environment
@@ -98,17 +99,9 @@ extension CCC {
                 environment[key] = value
             }
 
-            // Validate required env vars (skip in shell mode)
-            if !shell {
-                let missing = EnvLoader.validateRequired(profile.requiredEnvVars, in: environment)
-                if !missing.isEmpty {
-                    let vars = missing.joined(separator: ", ")
-                    throw ValidationError(
-                        "Missing required environment variables: \(vars)\n" +
-                        "Set them in ~/.ccc/env or pass with --env"
-                    )
-                }
-            }
+            // Note: we don't validate API keys here — agents support OAuth login
+            // and will prompt the user to authenticate if no API key is set.
+            // Credentials are persisted in ~/.ccc/state/<agent>/ across runs.
 
             // Determine entrypoint
             let entrypoint = shell ? ["/bin/bash"] : profile.entrypoint

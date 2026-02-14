@@ -1,11 +1,21 @@
 import Foundation
 
 enum MountResolver {
+    /// Directory on the host that persists agent credentials across container runs.
+    static let stateDir: URL = {
+        let dir = FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent(".ccc")
+            .appendingPathComponent("state")
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        return dir
+    }()
+
     static func resolve(
         target: URL,
         additional: [String],
         readOnly: [String],
-        includeGit: Bool
+        includeGit: Bool,
+        agent: String
     ) -> [Mount] {
         var mounts: [Mount] = []
 
@@ -44,6 +54,43 @@ enum MountResolver {
                     readOnly: true
                 ))
             }
+        }
+
+        // Persistent agent credential state (~/.ccc/state/<agent>/ → /home/coder/.<agent-config-dir>)
+        // This lets OAuth tokens survive container restarts so users only auth once.
+        let agentStateDir = stateDir.appendingPathComponent(agent)
+        try? FileManager.default.createDirectory(at: agentStateDir, withIntermediateDirectories: true)
+
+        switch agent {
+        case "claude-code":
+            // Claude Code stores credentials in ~/.claude/ and ~/.claude.json
+            let claudeDir = agentStateDir.appendingPathComponent("claude")
+            try? FileManager.default.createDirectory(at: claudeDir, withIntermediateDirectories: true)
+            mounts.append(Mount(
+                hostPath: claudeDir.path,
+                guestPath: "/home/coder/.claude",
+                readOnly: false
+            ))
+            // .claude.json holds account info and settings
+            let claudeJson = agentStateDir.appendingPathComponent("claude.json")
+            if !FileManager.default.fileExists(atPath: claudeJson.path) {
+                FileManager.default.createFile(atPath: claudeJson.path, contents: Data("{}".utf8))
+            }
+            mounts.append(Mount(
+                hostPath: claudeJson.path,
+                guestPath: "/home/coder/.claude.json",
+                readOnly: false
+            ))
+        case "codex":
+            let codexDir = agentStateDir.appendingPathComponent("codex")
+            try? FileManager.default.createDirectory(at: codexDir, withIntermediateDirectories: true)
+            mounts.append(Mount(
+                hostPath: codexDir.path,
+                guestPath: "/home/coder/.codex",
+                readOnly: false
+            ))
+        default:
+            break
         }
 
         return mounts

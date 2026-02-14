@@ -29,9 +29,9 @@ import Testing
 @Test func builtInAgentProfiles() {
     let claude = AgentProfile.claudeCode
     #expect(claude.name == "claude-code")
-    #expect(claude.requiredEnvVars.contains("ANTHROPIC_API_KEY"))
+    #expect(claude.entrypoint.contains("--dangerously-skip-permissions"))
 
     let codex = AgentProfile.codex
     #expect(codex.name == "codex")
-    #expect(codex.requiredEnvVars.contains("OPENAI_API_KEY"))
+    #expect(codex.entrypoint.contains("--full-auto"))
 }
