@@ -16,6 +16,8 @@ extension Spawn {
         mutating func run() throws {
             if verbose { logger.logLevel = .debug }
 
+            try ContainerRunner.preflight()
+
             let toolchains: [Toolchain]
             if let name = toolchain {
                 guard let tc = Toolchain(rawValue: name) else {

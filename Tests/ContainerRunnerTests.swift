@@ -1,3 +1,4 @@
+import Foundation
 import Testing
 
 @testable import spawn
@@ -65,4 +66,36 @@ import Testing
     )
 
     #expect(args.last == "/bin/bash")
+}
+
+// MARK: - Preflight tests
+
+@Test func preflightThrowsForMissingBinary() throws {
+    #expect(throws: SpawnError.self) {
+        try ContainerRunner.preflight(containerPath: "/nonexistent/path/to/container")
+    }
+}
+
+@Test func preflightThrowsForNonExecutableFile() throws {
+    let dir = try makeTempDir(files: ["not-executable": "just a file"])
+    let path = dir.appendingPathComponent("not-executable").path
+
+    #expect(throws: SpawnError.self) {
+        try ContainerRunner.preflight(containerPath: path)
+    }
+}
+
+@Test func preflightThrowsForFailingBinary() throws {
+    let dir = try makeTempDir(files: ["failing-bin": "#!/bin/sh\nexit 1\n"])
+    let path = dir.appendingPathComponent("failing-bin").path
+    try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: path)
+
+    #expect(throws: SpawnError.self) {
+        try ContainerRunner.preflight(containerPath: path)
+    }
+}
+
+@Test func preflightSucceedsForWorkingBinary() throws {
+    // Use a real signed binary that ignores arguments and exits 0
+    try ContainerRunner.preflight(containerPath: "/usr/bin/true")
 }

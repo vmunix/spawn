@@ -8,6 +8,8 @@ extension Spawn {
         )
 
         mutating func run() throws {
+            try ContainerRunner.preflight()
+
             let process = Process()
             process.executableURL = URL(fileURLWithPath: ContainerRunner.containerPath)
             process.arguments = ["list"]

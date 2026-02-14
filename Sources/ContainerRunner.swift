@@ -17,6 +17,48 @@ enum ContainerRunner: Sendable {
         return "container"
     }()
 
+    /// Verify the container CLI binary exists and responds before any container operation.
+    ///
+    /// Two-phase check:
+    /// 1. If the path is absolute, verify `FileManager.isExecutableFile(atPath:)`.
+    /// 2. Run `<binary> --version` and check for a zero exit code.
+    ///
+    /// - Parameter path: Override for the container binary path (defaults to `Self.containerPath`).
+    ///   Accepts a custom path for testing, matching the `storeRoot` pattern in `ImageChecker`.
+    /// - Throws: `SpawnError.containerNotFound` if the binary is missing or not executable,
+    ///   `SpawnError.runtimeError` if the binary exits non-zero.
+    static func preflight(containerPath path: String? = nil) throws {
+        let binary = path ?? containerPath
+
+        // Phase 1: If the path is absolute, check that it exists and is executable.
+        if binary.contains("/") {
+            guard FileManager.default.isExecutableFile(atPath: binary) else {
+                throw SpawnError.containerNotFound
+            }
+        }
+
+        // Phase 2: Run `container --version` to verify the runtime responds.
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: binary)
+        process.arguments = ["--version"]
+        process.standardOutput = FileHandle.nullDevice
+        process.standardError = FileHandle.nullDevice
+
+        do {
+            try process.run()
+        } catch {
+            throw SpawnError.containerNotFound
+        }
+        process.waitUntilExit()
+
+        guard process.terminationStatus == 0 else {
+            throw SpawnError.runtimeError(
+                "Container CLI at '\(binary)' exited with status \(process.terminationStatus). "
+                    + "Reinstall Apple's container tool or check your CONTAINER_PATH setting."
+            )
+        }
+    }
+
     /// Build the argument array for `container run`. Pure function — no side effects.
     static func buildArgs(
         image: String,
@@ -77,6 +119,8 @@ enum ContainerRunner: Sendable {
         cpus: Int,
         memory: String
     ) throws -> Int32 {
+        try preflight()
+
         let args = buildArgs(
             image: image, mounts: mounts, env: env,
             workdir: workdir, entrypoint: entrypoint,
@@ -157,6 +201,8 @@ enum ContainerRunner: Sendable {
 
     /// Run a raw command against the container CLI (for exec, list, stop, etc.)
     static func runRaw(args: [String]) throws -> Int32 {
+        try preflight()
+
         let process = Process()
         process.executableURL = URL(fileURLWithPath: containerPath)
         process.arguments = args
