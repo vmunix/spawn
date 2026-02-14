@@ -92,7 +92,7 @@ Each fixture is a minimal but buildable/testable project. Spawn auto-detects the
 | `EnvLoader.swift` | Parses KEY=VALUE files (comments, quotes), validates required vars, `parseKeyValue(_:)` utility |
 | `ImageChecker.swift` | Pre-flight image existence check against container CLI's image store |
 | `ImageCommand.swift` | `spawn image` group: `list` (default, filters to spawn-*), `rm` (safety-validated, spawn-* only) |
-| `ImageResolver.swift` | `Toolchain` → `"spawn-{toolchain}:latest"`, validates via OCI Reference |
+| `ImageResolver.swift` | `Toolchain` → `"spawn-{toolchain}:latest"`, validates via inline OCI regex |
 | `Log.swift` | Shared `Logger` instance (swift-log), bootstrapped to stderr, default level `.warning` |
 | `MountResolver.swift` | Builds mount list; copies git/SSH with symlink filtering and 0600 permissions on private keys |
 | `Paths.swift` | XDG Base Directory path resolution (configDir, stateDir) |
@@ -152,9 +152,9 @@ As spawn grows, adopt these patterns from the containerization library:
 
 ## Migration Path
 
-spawn is gradually migrating from shelling out to Apple's `container` CLI toward using the `containerization` Swift library directly.
+spawn currently shells out to Apple's `container` CLI for all container operations. The `containerization` Swift library dependency was removed to keep the dependency tree light and CI-friendly (the full library pulls in grpc-swift and other heavy transitive deps).
 
-- **Current state:** `ContainerizationOCI` used for image reference validation and pre-flight image checks.
 - **Seam:** `ContainerRunner` is the boundary where all `container` CLI interaction happens. Future library integration replaces its internals without changing callers.
 - **Domain types:** spawn's `Mount`, `Toolchain`, etc. remain the domain model. Adapt to library types at the boundary only.
-- **Next steps:** Add `Containerization` module to replace `container run` (VM lifecycle, VirtioFS, process I/O).
+- **OCI validation:** Inline regex replaces `ContainerizationOCI.Reference.parse()`. Image store checks use `JSONSerialization` instead of the library's `Descriptor` type.
+- **Next steps:** Re-add `Containerization` module when the library's transitive deps stabilize, to replace `container run` (VM lifecycle, VirtioFS, process I/O).

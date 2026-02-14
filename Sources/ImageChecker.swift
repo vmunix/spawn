@@ -1,4 +1,3 @@
-import ContainerizationOCI
 import Foundation
 
 /// Pre-flight check against the `container` CLI's local image store.
@@ -28,10 +27,10 @@ enum ImageChecker: Sendable {
         }
         let statePath = root.appendingPathComponent("state.json")
         guard let data = try? Data(contentsOf: statePath),
-            let state = try? JSONDecoder().decode([String: Descriptor].self, from: data)
+            let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
         else {
             return false
         }
-        return state[reference] != nil
+        return json[reference] != nil
     }
 }
