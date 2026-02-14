@@ -18,9 +18,6 @@ make lint                            # Run swift-format linter
 make format                          # Auto-fix formatting in-place
 make smoke                           # End-to-end smoke tests (cpp/go/rust fixtures in containers)
 make install                         # Install to /usr/local/bin
-make images                          # Build all container images via Apple's container CLI
-swift format lint --strict -r Sources Tests  # Lint all source files
-swift format format --in-place -r Sources Tests  # Auto-fix formatting
 ```
 
 ## Architecture
@@ -87,21 +84,21 @@ Each fixture is a minimal but buildable/testable project. Spawn auto-detects the
 
 | Module | Responsibility |
 |--------|---------------|
-| `Types.swift` | `Toolchain` enum, `Mount` struct (two initializers: auto-derive guest path, or custom), `AgentProfile` |
-| `Paths.swift` | XDG Base Directory path resolution (configDir, stateDir) |
-| `ToolchainDetector.swift` | Priority-ordered detection chain, delegates to `DevcontainerParser` |
-| `DevcontainerParser.swift` | Parses devcontainer.json: image, build.dockerfile, features, containerEnv |
-| `MountResolver.swift` | Builds mount list from target + additional + read-only + git/SSH + agent credential state |
-| `SpawnError.swift` | Structured runtime error type (containerFailed, containerNotFound, imageNotFound, runtimeError) |
-| `EnvLoader.swift` | Parses KEY=VALUE files (comments, quotes), validates required vars, `parseKeyValue(_:)` utility |
-| `ContainerRunner.swift` | `buildArgs()` pure function + `run()` via execv/Process + `runRaw()` passthrough |
-| `ImageResolver.swift` | `Toolchain` → `"spawn-{toolchain}:latest"`, validates via OCI Reference |
-| `ImageChecker.swift` | Pre-flight image existence check against container CLI's image store |
-| `CLI.swift` | `@main` entry point, `Spawn` root command with subcommand registration |
-| `ContainerfileTemplates.swift` | Embedded Containerfile strings for base/cpp (clang-21)/rust/go; parameterized version constants |
 | `BuildCommand.swift` | Writes embedded template to temp file, invokes `container build`, enforces base-first ordering |
-| `ImageCommand.swift` | `spawn image` group: `list` (default, filters to spawn-*), `rm` (with safety validation) |
+| `CLI.swift` | `@main` entry point, `Spawn` root command with subcommand registration |
+| `ContainerRunner.swift` | `buildArgs()` pure function + `run()` via execv/Process + `runRaw()` passthrough; redacts env vars in debug logs |
+| `ContainerfileTemplates.swift` | Embedded Containerfile strings for base/cpp (clang-21)/rust/go; parameterized version constants |
+| `DevcontainerParser.swift` | Parses devcontainer.json: image, build.dockerfile, features, containerEnv |
+| `EnvLoader.swift` | Parses KEY=VALUE files (comments, quotes), validates required vars, `parseKeyValue(_:)` utility |
+| `ImageChecker.swift` | Pre-flight image existence check against container CLI's image store |
+| `ImageCommand.swift` | `spawn image` group: `list` (default, filters to spawn-*), `rm` (safety-validated, spawn-* only) |
+| `ImageResolver.swift` | `Toolchain` → `"spawn-{toolchain}:latest"`, validates via OCI Reference |
 | `Log.swift` | Shared `Logger` instance (swift-log), bootstrapped to stderr, default level `.warning` |
+| `MountResolver.swift` | Builds mount list; copies git/SSH with symlink filtering and 0600 permissions on private keys |
+| `Paths.swift` | XDG Base Directory path resolution (configDir, stateDir) |
+| `SpawnError.swift` | Structured runtime error type (containerFailed, containerNotFound, imageNotFound, runtimeError) |
+| `ToolchainDetector.swift` | Priority-ordered detection chain, delegates to `DevcontainerParser` |
+| `Types.swift` | `Toolchain` enum, `Mount` struct (two initializers: auto-derive guest path, or custom), `AgentProfile` |
 
 ## Coding Conventions
 
@@ -138,7 +135,14 @@ Document public types and non-obvious functions with `///` comments. Focus on:
 
 ### Logging
 
-Uses [swift-log](https://github.com/apple/swift-log) with `StreamLogHandler.standardError`. A shared `logger` (in `Log.swift`) defaults to `.warning` (silent); commands set `.debug` when `--verbose` is passed. Use `logger.debug()` for diagnostic output (container commands, internal state). Keep `print()` for user-facing status messages (build progress, etc.).
+Uses [swift-log](https://github.com/apple/swift-log) with `StreamLogHandler.standardError`. A shared `logger` (in `Log.swift`) defaults to `.warning` (silent); commands set `.debug` when `--verbose` is passed. Use `logger.debug()` for diagnostic output (container commands, internal state). Keep `print()` for user-facing status messages (build progress, etc.). Environment variable values are redacted in debug output (`KEY=***`).
+
+### Security
+
+- **Mount paths are validated** — `--mount` and `--read-only` paths must exist and be directories
+- **SSH keys are copied, not mounted directly** — copied to XDG state dir with symlink filtering and 0600 permissions on private keys
+- **`spawn image rm` only removes `spawn-*` images** — protects base OS images and `spawn-base` (which other images depend on)
+- **Env var values are redacted in `--verbose` output** — prevents credential leakage in logs
 
 ### Future Patterns
 
