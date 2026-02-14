@@ -104,6 +104,24 @@ enum MountResolver: Sendable {
                         readOnly: true
                     ))
             }
+
+            // GitHub CLI auth config (~/.config/gh/)
+            let ghDir = home.appendingPathComponent(".config/gh")
+            if fm.fileExists(atPath: ghDir.path) {
+                let ghCopy = Paths.stateDir.appendingPathComponent("gh")
+                try? fm.removeItem(at: ghCopy)
+                do {
+                    try fm.copyItem(at: ghDir, to: ghCopy)
+                } catch {
+                    logger.warning("Failed to copy gh config to container state: \(error.localizedDescription)")
+                }
+                mounts.append(
+                    Mount(
+                        hostPath: ghCopy.path,
+                        guestPath: "/home/coder/.config/gh",
+                        readOnly: true
+                    ))
+            }
         }
 
         // Persistent agent credential state → /home/coder/.<agent-config-dir>

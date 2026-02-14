@@ -99,16 +99,31 @@ spawn auto-detects your project's language:
 
 Override with `--toolchain rust` or set `[toolchain] base = "rust"` in `.spawn.toml`.
 
-## Environment variables
+## Authentication
 
-API keys and config are loaded from `~/.config/spawn/env` (KEY=VALUE format), or pass them directly:
+On first run, you'll need to authenticate Claude Code and the GitHub CLI inside the container. Each only needs to be done once — credentials are persisted across runs.
+
+```bash
+# First run: Claude Code will prompt you to authenticate via OAuth
+spawn ~/code/my-project
+
+# To authenticate gh, drop into a shell and run the login flow
+spawn ~/code/my-project --shell
+# then inside the container:
+gh auth login
+```
+
+Claude Code credentials are persisted in `~/.local/state/spawn/<agent>/`. The `gh` CLI config from your host (`~/.config/gh/`) is mounted into the container, but tokens stored in the macOS keychain don't transfer — so the in-container `gh auth login` is needed once.
+
+Alternatively, you can pass API keys directly:
 
 ```bash
 spawn . --env ANTHROPIC_API_KEY=sk-...
+spawn . --env GH_TOKEN=ghp_...
 spawn . --env-file ~/secrets/env
 ```
 
-OAuth login is also supported — if no API key is set, Claude Code and Codex will prompt you to authenticate. Credentials are persisted in `~/.local/state/spawn/<agent>/` across container runs.
+Environment variables are also loaded from `~/.config/spawn/env` (KEY=VALUE format).
 
 ## Container images
 
