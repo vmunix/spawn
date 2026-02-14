@@ -41,7 +41,7 @@ enum ToolchainDetector: Sendable {
 
         if exists("Cargo.toml") || exists("rust-toolchain.toml") { return .rust }
         if exists("go.mod") || exists("go.sum") { return .go }
-        if exists("CMakeLists.txt") || exists("Makefile") { return .cpp }
+        if exists("CMakeLists.txt") { return .cpp }
 
         return .base
     }

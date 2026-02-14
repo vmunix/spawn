@@ -60,11 +60,13 @@ enum ContainerfileTemplates: Sendable {
     static let cpp = """
         FROM spawn-base:latest
 
+        USER root
         RUN apt-get update && apt-get install -y --no-install-recommends \\
             clang clang-format clang-tidy \\
             cmake ninja-build \\
             gdb valgrind \\
             && rm -rf /var/lib/apt/lists/*
+        USER coder
         """
 
     static let rust = """

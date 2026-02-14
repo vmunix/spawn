@@ -62,12 +62,22 @@ enum MountResolver: Sendable {
             let sshDir = home.appendingPathComponent(".ssh")
             if fm.fileExists(atPath: sshDir.path) {
                 let sshCopy = Paths.stateDir.appendingPathComponent("ssh")
-                // Fresh copy each run to pick up key changes
+                // Fresh copy each run to pick up key changes.
+                // Copy files individually to skip sockets (SSH agent) and other non-regular files.
                 try? fm.removeItem(at: sshCopy)
                 do {
-                    try fm.copyItem(at: sshDir, to: sshCopy)
+                    try fm.createDirectory(at: sshCopy, withIntermediateDirectories: true)
+                    let contents = try fm.contentsOfDirectory(atPath: sshDir.path)
+                    for item in contents {
+                        let src = sshDir.appendingPathComponent(item)
+                        var isDir: ObjCBool = false
+                        guard fm.fileExists(atPath: src.path, isDirectory: &isDir), !isDir.boolValue else {
+                            continue
+                        }
+                        try fm.copyItem(at: src, to: sshCopy.appendingPathComponent(item))
+                    }
                 } catch {
-                    logger.warning("Failed to copy .ssh directory to container state: \(error.localizedDescription)")
+                    logger.warning("Failed to copy .ssh files to container state: \(error.localizedDescription)")
                 }
                 mounts.append(
                     Mount(

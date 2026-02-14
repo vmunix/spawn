@@ -20,10 +20,10 @@ import Testing
     #expect(result == .cpp)
 }
 
-@Test func detectsCppFromMakefile() throws {
+@Test func makefileAloneFallsToBase() throws {
     let dir = try makeTempDir(files: ["Makefile": ""])
     let result = ToolchainDetector.detect(in: dir)
-    #expect(result == .cpp)
+    #expect(result == .base)
 }
 
 @Test func fallsBackToBase() throws {
