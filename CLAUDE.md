@@ -16,6 +16,7 @@ make build                           # Release build
 make test                            # Lint + run tests
 make lint                            # Run swift-format linter
 make format                          # Auto-fix formatting in-place
+make smoke                           # End-to-end smoke tests (cpp/go/rust fixtures in containers)
 make install                         # Install to /usr/local/bin
 make images                          # Build all container images via Apple's container CLI
 swift format lint --strict -r Sources Tests  # Lint all source files
@@ -47,12 +48,12 @@ RunCommand.run()
 1. `.spawn.toml` `[toolchain] base = "..."` — explicit config
 2. `.devcontainer/devcontainer.json` — parsed by `DevcontainerParser`
 3. `Dockerfile` / `Containerfile` in repo root — returns nil
-4. Auto-detect from repo files (`Cargo.toml` → rust, `go.mod` → go, `CMakeLists.txt` → cpp)
+4. Auto-detect from repo files (`Cargo.toml` → rust, `go.mod` → go, `CMakeLists.txt` → cpp). Note: `Makefile` alone does not trigger cpp — it's too common across languages.
 5. Fallback → `.base`
 
 ### Key Design Decisions
 
-- **All container interaction goes through Apple's `container` CLI** (auto-detected at `/opt/homebrew/bin/container` or `/usr/local/bin/container`, falling back to PATH). `ContainerRunner` constructs argument arrays and invokes it.
+- **All container interaction goes through Apple's `container` CLI** (auto-detected at `/opt/homebrew/bin/container` or `/usr/local/bin/container`, falling back to PATH; overridable via `CONTAINER_PATH` env var). `ContainerRunner` constructs argument arrays and invokes it.
 - **`ContainerRunner.buildArgs()` is a pure function** — takes all inputs, returns `[String]`. This is what tests verify. The actual process execution (`ContainerRunner.run()`) is not unit tested since it requires the container runtime.
 - **TTY via `execv`**: When stdin is a real terminal, `ContainerRunner.run()` uses `execv` to replace the spawn process with `container`, giving it direct TTY access (required for `-t` flag and interactive I/O). When stdin is a pipe, it falls back to `Foundation.Process` with signal forwarding.
 - **Agents run in sandbox mode**: Claude Code gets `--dangerously-skip-permissions`, Codex gets `--full-auto` — the container is the sandbox.
@@ -70,6 +71,18 @@ Tests use Apple's `swift-testing` framework (added as an explicit package depend
 - Temp directories are auto-cleaned on first `makeTempDir` call per test run
 - `TestHelpers.swift` imports Foundation; test files import `Testing` and `@testable import spawn`
 
+### Smoke Tests
+
+`make smoke` runs end-to-end tests using fixture projects in `fixtures/`:
+
+| Fixture | Toolchain | What it tests |
+|---------|-----------|---------------|
+| `fixtures/cpp-sample/` | cpp (clang-21) | CMake + Ninja build, ctest |
+| `fixtures/go-sample/` | go | `go build` + `go test` |
+| `fixtures/rust-sample/` | rust | `cargo build` + `cargo test` |
+
+Each fixture is a minimal but buildable/testable project. Spawn auto-detects the toolchain, selects the image, and runs build+test inside the container. Requires images to be built first (`spawn build`).
+
 ## Module Reference
 
 | Module | Responsibility |
@@ -84,7 +97,8 @@ Tests use Apple's `swift-testing` framework (added as an explicit package depend
 | `ContainerRunner.swift` | `buildArgs()` pure function + `run()` via execv/Process + `runRaw()` passthrough |
 | `ImageResolver.swift` | `Toolchain` → `"spawn-{toolchain}:latest"`, validates via OCI Reference |
 | `ImageChecker.swift` | Pre-flight image existence check against container CLI's image store |
-| `ContainerfileTemplates.swift` | Embedded Containerfile strings for base/cpp/rust/go |
+| `CLI.swift` | `@main` entry point, `Spawn` root command with subcommand registration |
+| `ContainerfileTemplates.swift` | Embedded Containerfile strings for base/cpp (clang-21)/rust/go; parameterized version constants |
 | `BuildCommand.swift` | Writes embedded template to temp file, invokes `container build`, enforces base-first ordering |
 | `Log.swift` | Shared `Logger` instance (swift-log), bootstrapped to stderr, default level `.warning` |
 
