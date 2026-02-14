@@ -39,10 +39,18 @@ enum MountResolver: Sendable {
             let gitconfig = home.appendingPathComponent(".gitconfig")
             if fm.fileExists(atPath: gitconfig.path) {
                 let gitDir = Paths.stateDir.appendingPathComponent("git")
-                try? fm.createDirectory(at: gitDir, withIntermediateDirectories: true)
+                do {
+                    try fm.createDirectory(at: gitDir, withIntermediateDirectories: true)
+                } catch {
+                    logger.warning("Failed to create git state directory \(gitDir.path): \(error.localizedDescription)")
+                }
                 let dest = gitDir.appendingPathComponent(".gitconfig")
                 try? fm.removeItem(at: dest)
-                try? fm.copyItem(at: gitconfig, to: dest)
+                do {
+                    try fm.copyItem(at: gitconfig, to: dest)
+                } catch {
+                    logger.warning("Failed to copy .gitconfig to container state: \(error.localizedDescription)")
+                }
                 mounts.append(
                     Mount(
                         hostPath: gitDir.path,
@@ -56,7 +64,11 @@ enum MountResolver: Sendable {
                 let sshCopy = Paths.stateDir.appendingPathComponent("ssh")
                 // Fresh copy each run to pick up key changes
                 try? fm.removeItem(at: sshCopy)
-                try? fm.copyItem(at: sshDir, to: sshCopy)
+                do {
+                    try fm.copyItem(at: sshDir, to: sshCopy)
+                } catch {
+                    logger.warning("Failed to copy .ssh directory to container state: \(error.localizedDescription)")
+                }
                 mounts.append(
                     Mount(
                         hostPath: sshCopy.path,
@@ -69,7 +81,11 @@ enum MountResolver: Sendable {
         // Persistent agent credential state → /home/coder/.<agent-config-dir>
         // This lets OAuth tokens survive container restarts so users only auth once.
         let agentStateDir = Paths.stateDir.appendingPathComponent(agent)
-        try? FileManager.default.createDirectory(at: agentStateDir, withIntermediateDirectories: true)
+        do {
+            try FileManager.default.createDirectory(at: agentStateDir, withIntermediateDirectories: true)
+        } catch {
+            logger.warning("Failed to create agent state directory \(agentStateDir.path): \(error.localizedDescription)")
+        }
 
         switch agent {
         case "claude-code":
@@ -79,7 +95,12 @@ enum MountResolver: Sendable {
             // atomic rename on bind-mounted files (EBUSY). Instead, we mount a directory at
             // ~/.claude-state/ and the Containerfile symlinks ~/.claude.json into it.
             let claudeDir = agentStateDir.appendingPathComponent("claude")
-            try? FileManager.default.createDirectory(at: claudeDir, withIntermediateDirectories: true)
+            do {
+                try FileManager.default.createDirectory(at: claudeDir, withIntermediateDirectories: true)
+            } catch {
+                logger.warning(
+                    "Failed to create Claude config directory \(claudeDir.path): \(error.localizedDescription)")
+            }
             mounts.append(
                 Mount(
                     hostPath: claudeDir.path,
@@ -87,7 +108,13 @@ enum MountResolver: Sendable {
                     readOnly: false
                 ))
             let claudeStateDir = agentStateDir.appendingPathComponent("claude-state")
-            try? FileManager.default.createDirectory(at: claudeStateDir, withIntermediateDirectories: true)
+            do {
+                try FileManager.default.createDirectory(at: claudeStateDir, withIntermediateDirectories: true)
+            } catch {
+                logger.warning(
+                    "Failed to create Claude state directory \(claudeStateDir.path): \(error.localizedDescription)"
+                )
+            }
             mounts.append(
                 Mount(
                     hostPath: claudeStateDir.path,
@@ -96,7 +123,12 @@ enum MountResolver: Sendable {
                 ))
         case "codex":
             let codexDir = agentStateDir.appendingPathComponent("codex")
-            try? FileManager.default.createDirectory(at: codexDir, withIntermediateDirectories: true)
+            do {
+                try FileManager.default.createDirectory(at: codexDir, withIntermediateDirectories: true)
+            } catch {
+                logger.warning(
+                    "Failed to create Codex state directory \(codexDir.path): \(error.localizedDescription)")
+            }
             mounts.append(
                 Mount(
                     hostPath: codexDir.path,

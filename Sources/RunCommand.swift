@@ -52,6 +52,15 @@ extension CCC {
         mutating func run() async throws {
             if verbose { logger.logLevel = .debug }
 
+            // Validate workspace path
+            var isDirectory: ObjCBool = false
+            guard FileManager.default.fileExists(atPath: path.path, isDirectory: &isDirectory) else {
+                throw ValidationError("Path does not exist: \(path.path)")
+            }
+            guard isDirectory.boolValue else {
+                throw ValidationError("Path is not a directory: \(path.path)")
+            }
+
             // Resolve agent profile
             guard let profile = AgentProfile.named(agent) else {
                 throw ValidationError("Unknown agent: \(agent). Use 'claude-code' or 'codex'.")

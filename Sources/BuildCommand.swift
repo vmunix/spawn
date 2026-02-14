@@ -40,7 +40,7 @@ extension CCC {
                 let process = Process()
                 process.executableURL = URL(fileURLWithPath: ContainerRunner.containerPath)
                 process.arguments = ["build", "-t", imageName, "-f", tmpContainerfile.path, "."]
-                process.standardOutput = verbose ? FileHandle.standardOutput : nil
+                process.standardOutput = FileHandle.standardOutput
                 process.standardError = FileHandle.standardError
 
                 try process.run()
