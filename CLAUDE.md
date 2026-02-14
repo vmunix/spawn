@@ -49,8 +49,10 @@ RunCommand.run()
 
 ### Key Design Decisions
 
-- **All container interaction goes through Apple's `container` CLI** (`/usr/local/bin/container`). `ContainerRunner` constructs argument arrays and invokes it via `Foundation.Process`.
+- **All container interaction goes through Apple's `container` CLI** (auto-detected at `/opt/homebrew/bin/container` or `/usr/local/bin/container`, falling back to PATH). `ContainerRunner` constructs argument arrays and invokes it via `Foundation.Process`.
 - **`ContainerRunner.buildArgs()` is a pure function** — takes all inputs, returns `[String]`. This is what tests verify. The actual process execution (`ContainerRunner.run()`) is not unit tested since it requires the container runtime.
+- **Apple's `container` CLI (v0.9.0) does not support TTY allocation** (`-t` flag fails). We use `-i` (interactive stdin) only.
+- **`--shell` mode skips API key validation** — useful for debugging containers without setting up `~/.ccc/env`.
 - **Containerfile content is embedded in `ContainerfileTemplates.swift`** as string literals so `ccc build` works after installation (no dependency on repo file paths).
 - **Signal forwarding**: `ContainerRunner.run()` uses `DispatchSource.makeSignalSource` to forward SIGINT/SIGTERM to the child container process, then restores default handlers.
 
