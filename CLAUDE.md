@@ -20,6 +20,10 @@ make smoke                           # End-to-end smoke tests (cpp/go/rust fixtu
 make install                         # Install to /usr/local/bin
 ```
 
+## Pre-commit
+
+Always run `make test` (lint + all tests) and fix any issues before `git commit` / `git push`.
+
 ## Architecture
 
 `spawn` is a Swift CLI that wraps Apple's `container` tool to run AI coding agents (Claude Code, Codex) in filesystem-isolated Linux VMs on macOS. The user runs `spawn .` from a repo directory; the tool auto-detects the toolchain, selects the right container image, mounts only the specified directories, and launches the agent.
