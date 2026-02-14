@@ -63,7 +63,11 @@ enum MountResolver {
 
         switch agent {
         case "claude-code":
-            // Claude Code stores credentials in ~/.claude/ and ~/.claude.json
+            // Mount a single directory for all Claude Code state.
+            // Claude Code uses ~/.claude/ for config/plugins and ~/.claude.json for account state.
+            // We can't mount .claude.json as a single file because VirtioFS doesn't support
+            // atomic rename on bind-mounted files (EBUSY). Instead, we mount a directory at
+            // ~/.claude-state/ and the Containerfile symlinks ~/.claude.json into it.
             let claudeDir = agentStateDir.appendingPathComponent("claude")
             try? FileManager.default.createDirectory(at: claudeDir, withIntermediateDirectories: true)
             mounts.append(Mount(
@@ -71,14 +75,11 @@ enum MountResolver {
                 guestPath: "/home/coder/.claude",
                 readOnly: false
             ))
-            // .claude.json holds account info and settings
-            let claudeJson = agentStateDir.appendingPathComponent("claude.json")
-            if !FileManager.default.fileExists(atPath: claudeJson.path) {
-                FileManager.default.createFile(atPath: claudeJson.path, contents: Data("{}".utf8))
-            }
+            let claudeStateDir = agentStateDir.appendingPathComponent("claude-state")
+            try? FileManager.default.createDirectory(at: claudeStateDir, withIntermediateDirectories: true)
             mounts.append(Mount(
-                hostPath: claudeJson.path,
-                guestPath: "/home/coder/.claude.json",
+                hostPath: claudeStateDir.path,
+                guestPath: "/home/coder/.claude-state",
                 readOnly: false
             ))
         case "codex":

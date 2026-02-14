@@ -55,7 +55,7 @@ import Testing
         agent: "claude-code"
     )
     #expect(mounts.contains { $0.guestPath == "/home/coder/.claude" && !$0.readOnly })
-    #expect(mounts.contains { $0.guestPath == "/home/coder/.claude.json" && !$0.readOnly })
+    #expect(mounts.contains { $0.guestPath == "/home/coder/.claude-state" && !$0.readOnly })
 }
 
 @Test func mountsCodexCredentialState() {
