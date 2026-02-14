@@ -45,9 +45,18 @@ enum ToolchainDetector {
 
     private static func parseCccToml(at url: URL) -> Toolchain? {
         guard let content = try? String(contentsOf: url, encoding: .utf8) else { return nil }
+        var inToolchainSection = false
         for line in content.components(separatedBy: .newlines) {
             let trimmed = line.trimmingCharacters(in: .whitespaces)
-            if trimmed.hasPrefix("base") && trimmed.contains("=") {
+            // Track TOML sections
+            if trimmed.hasPrefix("[") {
+                inToolchainSection = trimmed.hasPrefix("[toolchain]")
+                continue
+            }
+            guard inToolchainSection else { continue }
+            // Match "base = ..." precisely
+            let normalized = trimmed.replacingOccurrences(of: " ", with: "")
+            if normalized.hasPrefix("base=") {
                 let value = trimmed
                     .split(separator: "=", maxSplits: 1).last?
                     .trimmingCharacters(in: .whitespaces)

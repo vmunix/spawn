@@ -21,7 +21,8 @@ extension CCC {
                 }
                 toolchains = [tc]
             } else {
-                toolchains = Toolchain.allCases
+                // base must be built first since other images depend on it
+                toolchains = [.base] + Toolchain.allCases.filter { $0 != .base }
             }
 
             for tc in toolchains {

@@ -59,3 +59,17 @@ import Testing
     let result = ToolchainDetector.detect(in: dir)
     #expect(result == nil)
 }
+
+@Test func cccTomlIgnoresOtherSections() throws {
+    let dir = try makeTempDir(files: [
+        ".ccc.toml": """
+        [agent]
+        base_url = "https://example.com"
+
+        [toolchain]
+        base = "rust"
+        """
+    ])
+    let result = ToolchainDetector.detect(in: dir)
+    #expect(result == .rust)
+}

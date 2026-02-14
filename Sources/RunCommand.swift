@@ -126,7 +126,9 @@ extension CCC {
                 verbose: verbose
             )
 
-            throw ExitCode(status)
+            if status != 0 {
+                throw ExitCode(status)
+            }
         }
     }
 }

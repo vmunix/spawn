@@ -17,7 +17,9 @@ extension CCC {
             var args = ["exec", id]
             args += command
             let status = try ContainerRunner.runRaw(args: args)
-            throw ExitCode(status)
+            if status != 0 {
+                throw ExitCode(status)
+            }
         }
     }
 }
