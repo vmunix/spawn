@@ -30,9 +30,11 @@ import Testing
 @Test func builtInAgentProfiles() {
     let claude = AgentProfile.claudeCode
     #expect(claude.name == "claude-code")
-    #expect(claude.entrypoint.contains("--dangerously-skip-permissions"))
+    #expect(claude.safeEntrypoint == ["claude"])
+    #expect(claude.yoloEntrypoint == ["claude", "--dangerously-skip-permissions"])
 
     let codex = AgentProfile.codex
     #expect(codex.name == "codex")
-    #expect(codex.entrypoint.contains("--full-auto"))
+    #expect(codex.safeEntrypoint == ["codex", "--full-auto"])
+    #expect(codex.yoloEntrypoint == ["codex", "--full-auto"])
 }

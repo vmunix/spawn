@@ -37,25 +37,28 @@ struct Mount: Sendable {
 /// Configuration for a supported AI coding agent (entrypoint, resource defaults).
 struct AgentProfile: Sendable {
     let name: String
-    let entrypoint: [String]
+    let safeEntrypoint: [String]
+    let yoloEntrypoint: [String]
     let requiredEnvVars: [String]
     let defaultCPUs: Int
     let defaultMemory: String
 
     static let claudeCode = AgentProfile(
         name: "claude-code",
-        entrypoint: ["claude", "--dangerously-skip-permissions"],
+        safeEntrypoint: ["claude"],
+        yoloEntrypoint: ["claude", "--dangerously-skip-permissions"],
         requiredEnvVars: [],
         defaultCPUs: 4,
-        defaultMemory: "8g"
+        defaultMemory: "8g",
     )
 
     static let codex = AgentProfile(
         name: "codex",
-        entrypoint: ["codex", "--full-auto"],
+        safeEntrypoint: ["codex", "--full-auto"],
+        yoloEntrypoint: ["codex", "--full-auto"],
         requiredEnvVars: [],
         defaultCPUs: 4,
-        defaultMemory: "8g"
+        defaultMemory: "8g",
     )
 
     static func named(_ name: String) -> AgentProfile? {

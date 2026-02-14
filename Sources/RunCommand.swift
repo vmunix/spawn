@@ -157,7 +157,7 @@ extension Spawn {
             // Credentials are persisted in $XDG_STATE_HOME/spawn/<agent>/ across runs.
 
             // Determine entrypoint
-            let entrypoint = shell ? ["/bin/bash"] : profile.entrypoint
+            let entrypoint = shell ? ["/bin/bash"] : profile.yoloEntrypoint
 
             // Working directory
             let workdir = "/workspace/\(path.lastPathComponent)"

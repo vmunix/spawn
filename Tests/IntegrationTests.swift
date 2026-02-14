@@ -25,7 +25,7 @@ import Testing
         mounts: mounts,
         env: [:],
         workdir: "/workspace/\(target.lastPathComponent)",
-        entrypoint: AgentProfile.claudeCode.entrypoint,
+        entrypoint: AgentProfile.claudeCode.yoloEntrypoint,
         cpus: 4,
         memory: "8g"
     )
@@ -50,7 +50,7 @@ import Testing
         mounts: [Mount(hostPath: target.path, readOnly: false)],
         env: [:],
         workdir: "/workspace/\(target.lastPathComponent)",
-        entrypoint: AgentProfile.codex.entrypoint,
+        entrypoint: AgentProfile.codex.yoloEntrypoint,
         cpus: 2,
         memory: "4g"
     )
