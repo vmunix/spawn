@@ -7,15 +7,126 @@ extension CCC {
             abstract: "Run an AI coding agent in a sandboxed container."
         )
 
-        @Argument(help: "Directory to mount as workspace.",
-                  transform: { str in URL(fileURLWithPath: str).standardizedFileURL })
+        @Argument(
+            help: "Directory to mount as workspace.",
+            transform: { URL(fileURLWithPath: $0).standardizedFileURL }
+        )
         var path: URL
 
-        @Argument(help: "Agent to run: claude-code (default), codex")
+        @Argument(help: "Agent: claude-code (default), codex")
         var agent: String = "claude-code"
 
+        @Option(name: .long, help: "Additional directory to mount (repeatable).")
+        var mount: [String] = []
+
+        @Option(name: .customLong("read-only"), help: "Mount directory read-only (repeatable).")
+        var readOnlyMounts: [String] = []
+
+        @Option(name: .long, help: "Environment variable KEY=VALUE (repeatable).")
+        var env: [String] = []
+
+        @Option(name: .customLong("env-file"), help: "Path to env file.")
+        var envFile: String?
+
+        @Option(name: .long, help: "Override base image.")
+        var image: String?
+
+        @Option(name: .long, help: "Override toolchain: base, cpp, rust, go")
+        var toolchain: String?
+
+        @Option(name: .long, help: "CPU cores.")
+        var cpus: Int = 4
+
+        @Option(name: .long, help: "Memory (e.g., 8g).")
+        var memory: String = "8g"
+
+        @Flag(name: .long, help: "Drop into shell instead of running agent.")
+        var shell: Bool = false
+
+        @Flag(name: .customLong("no-git"), help: "Don't mount ~/.gitconfig or SSH.")
+        var noGit: Bool = false
+
+        @Flag(name: .long, help: "Show container commands.")
+        var verbose: Bool = false
+
         mutating func run() async throws {
-            print("Would run \(agent) on \(path.path)")
+            // Resolve agent profile
+            guard let profile = AgentProfile.named(agent) else {
+                throw ValidationError("Unknown agent: \(agent). Use 'claude-code' or 'codex'.")
+            }
+
+            // Resolve toolchain
+            let resolvedToolchain: Toolchain
+            if let override = toolchain {
+                guard let tc = Toolchain(rawValue: override) else {
+                    throw ValidationError("Unknown toolchain: \(override). Use: base, cpp, rust, go.")
+                }
+                resolvedToolchain = tc
+            } else {
+                resolvedToolchain = ToolchainDetector.detect(in: path) ?? .base
+            }
+
+            // Resolve image
+            let resolvedImage = ImageResolver.resolve(
+                toolchain: resolvedToolchain,
+                imageOverride: image
+            )
+
+            // Resolve mounts
+            let resolvedMounts = MountResolver.resolve(
+                target: path,
+                additional: mount,
+                readOnly: readOnlyMounts,
+                includeGit: !noGit
+            )
+
+            // Load environment
+            var environment: [String: String]
+            if let envFile {
+                environment = try EnvLoader.load(from: envFile)
+            } else {
+                environment = EnvLoader.loadDefault()
+            }
+
+            // CLI --env overrides
+            for envVar in env {
+                guard let eqIndex = envVar.firstIndex(of: "=") else {
+                    throw ValidationError("Invalid env format: \(envVar). Use KEY=VALUE.")
+                }
+                let key = String(envVar[envVar.startIndex..<eqIndex])
+                let value = String(envVar[envVar.index(after: eqIndex)...])
+                environment[key] = value
+            }
+
+            // Validate required env vars
+            let missing = EnvLoader.validateRequired(profile.requiredEnvVars, in: environment)
+            if !missing.isEmpty {
+                let vars = missing.joined(separator: ", ")
+                throw ValidationError(
+                    "Missing required environment variables: \(vars)\n" +
+                    "Set them in ~/.ccc/env or pass with --env"
+                )
+            }
+
+            // Determine entrypoint
+            let entrypoint = shell ? ["/bin/bash"] : profile.entrypoint
+
+            // Working directory
+            let workdir = "/workspace/\(path.lastPathComponent)"
+
+            // Run
+            let status = try ContainerRunner.run(
+                image: resolvedImage,
+                mounts: resolvedMounts,
+                env: environment,
+                workdir: workdir,
+                entrypoint: entrypoint,
+                cpus: cpus,
+                memory: memory,
+                verbose: verbose
+            )
+
+            throw ExitCode(status)
         }
     }
 }
