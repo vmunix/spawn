@@ -6,7 +6,7 @@ struct Spawn: AsyncParsableCommand {
         commandName: "spawn",
         abstract: "Sandboxed AI coding agents on macOS.",
         version: "0.1.0",
-        subcommands: [Run.self, Build.self, Images.self, List.self, Stop.self, Exec.self],
+        subcommands: [Run.self, Build.self, Image.self, List.self, Stop.self, Exec.self],
         defaultSubcommand: Run.self
     )
 }
