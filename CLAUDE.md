@@ -77,6 +77,16 @@ Tests use Apple's `swift-testing` framework (added as an explicit package depend
 | `MountResolver.swift` | Builds mount list from target + additional + read-only + git/SSH + agent credential state |
 | `EnvLoader.swift` | Parses KEY=VALUE files (comments, quotes), validates required vars |
 | `ContainerRunner.swift` | `buildArgs()` pure function + `run()` via execv/Process + `runRaw()` passthrough |
-| `ImageResolver.swift` | `Toolchain` → `"spawn-{toolchain}:latest"`, with override support |
+| `ImageResolver.swift` | `Toolchain` → `"spawn-{toolchain}:latest"`, validates via OCI Reference |
+| `ImageChecker.swift` | Pre-flight image existence check against container CLI's image store |
 | `ContainerfileTemplates.swift` | Embedded Containerfile strings for base/cpp/rust/go |
 | `BuildCommand.swift` | Writes embedded template to temp file, invokes `container build`, enforces base-first ordering |
+
+## Migration Path
+
+spawn is gradually migrating from shelling out to Apple's `container` CLI toward using the `containerization` Swift library directly.
+
+- **Current state:** `ContainerizationOCI` used for image reference validation and pre-flight image checks.
+- **Seam:** `ContainerRunner` is the boundary where all `container` CLI interaction happens. Future library integration replaces its internals without changing callers.
+- **Domain types:** spawn's `Mount`, `Toolchain`, etc. remain the domain model. Adapt to library types at the boundary only.
+- **Next steps:** Add `Containerization` module to replace `container run` (VM lifecycle, VirtioFS, process I/O).
