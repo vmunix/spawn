@@ -31,7 +31,7 @@ enum MountResolver {
             if fm.fileExists(atPath: gitconfig) {
                 mounts.append(Mount(
                     hostPath: gitconfig,
-                    guestPath: "/root/.gitconfig",
+                    guestPath: "/home/coder/.gitconfig",
                     readOnly: true
                 ))
             }
@@ -40,7 +40,7 @@ enum MountResolver {
             if fm.fileExists(atPath: sshDir) {
                 mounts.append(Mount(
                     hostPath: sshDir,
-                    guestPath: "/root/.ssh",
+                    guestPath: "/home/coder/.ssh",
                     readOnly: true
                 ))
             }

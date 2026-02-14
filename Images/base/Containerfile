@@ -1,7 +1,7 @@
 FROM ubuntu:24.04
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    git curl wget ca-certificates \
+    git curl wget ca-certificates sudo \
     build-essential \
     python3 python3-pip python3-venv \
     nodejs npm \
@@ -15,4 +15,9 @@ RUN npm install -g @anthropic-ai/claude-code
 # Codex (OpenAI)
 RUN npm install -g @openai/codex
 
+# Non-root user with sudo access
+RUN useradd -m -s /bin/bash -G sudo coder \
+    && echo 'coder ALL=(ALL) NOPASSWD:ALL' >> /etc/sudoers
+
+USER coder
 WORKDIR /workspace

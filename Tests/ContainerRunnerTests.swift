@@ -24,7 +24,7 @@ import Testing
         mounts: [
             Mount(hostPath: "/code/project", readOnly: false),
             Mount(hostPath: "/code/lib", readOnly: true),
-            Mount(hostPath: "/root/.gitconfig", guestPath: "/root/.gitconfig", readOnly: true),
+            Mount(hostPath: "/home/user/.gitconfig", guestPath: "/home/coder/.gitconfig", readOnly: true),
         ],
         env: [:],
         workdir: "/workspace/project",
