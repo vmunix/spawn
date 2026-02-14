@@ -114,6 +114,14 @@ extension Spawn {
                 throw SpawnError.imageNotFound(image: resolvedImage, hint: buildHint)
             }
 
+            // Warn if toolchain image is older than spawn-base:latest
+            if image == nil, resolvedToolchain != .base,
+                ImageChecker.isStale(resolvedImage)
+            {
+                print("Warning: \(resolvedImage) was built before spawn-base:latest.")
+                print("Run 'spawn build \(resolvedToolchain.rawValue)' to rebuild.")
+            }
+
             // Resolve mounts
             let resolvedMounts = MountResolver.resolve(
                 target: path,
