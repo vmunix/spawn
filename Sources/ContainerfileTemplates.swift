@@ -20,9 +20,6 @@ enum ContainerfileTemplates {
         openssh-client \\
         && rm -rf /var/lib/apt/lists/*
 
-    # Claude Code
-    RUN npm install -g @anthropic-ai/claude-code
-
     # Codex (OpenAI)
     RUN npm install -g @openai/codex
 
@@ -30,7 +27,11 @@ enum ContainerfileTemplates {
     RUN useradd -m -s /bin/bash -G sudo coder \\
         && echo 'coder ALL=(ALL) NOPASSWD:ALL' >> /etc/sudoers
 
+    # Claude Code (native installer, as coder so it lands in /home/coder/.local/bin)
     USER coder
+    RUN curl -fsSL https://claude.ai/install.sh | bash
+    ENV PATH="/home/coder/.local/bin:${PATH}"
+
     WORKDIR /workspace
     """
 

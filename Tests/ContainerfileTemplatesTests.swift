@@ -4,7 +4,7 @@ import Testing
 @Test func baseContainerfileContainsEssentials() {
     let content = ContainerfileTemplates.content(for: .base)
     #expect(content.contains("FROM ubuntu:24.04"))
-    #expect(content.contains("claude-code"))
+    #expect(content.contains("claude.ai/install.sh"))
     #expect(content.contains("codex"))
     #expect(content.contains("ripgrep"))
 }
