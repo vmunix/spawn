@@ -1,7 +1,7 @@
 import ArgumentParser
 import Foundation
 
-extension CCC {
+extension Spawn {
     struct Run: AsyncParsableCommand {
         static let configuration = CommandConfiguration(
             abstract: "Run an AI coding agent in a sandboxed container."
@@ -89,7 +89,7 @@ extension CCC {
                     image != nil
                     ? "Pull or build the image first."
                     : "Run 'spawn build \(resolvedToolchain.rawValue)' first."
-                throw ValidationError("Image '\(resolvedImage)' not found. \(buildHint)")
+                throw SpawnError.imageNotFound(image: resolvedImage, hint: buildHint)
             }
 
             // Resolve mounts
@@ -111,12 +111,10 @@ extension CCC {
 
             // CLI --env overrides
             for envVar in env {
-                guard let eqIndex = envVar.firstIndex(of: "=") else {
+                guard let parsed = EnvLoader.parseKeyValue(envVar) else {
                     throw ValidationError("Invalid env format: \(envVar). Use KEY=VALUE.")
                 }
-                let key = String(envVar[envVar.startIndex..<eqIndex])
-                let value = String(envVar[envVar.index(after: eqIndex)...])
-                environment[key] = value
+                environment[parsed.key] = parsed.value
             }
 
             // Note: we don't validate API keys here — agents support OAuth login

@@ -1,7 +1,7 @@
 import ArgumentParser
 import Foundation
 
-extension CCC {
+extension Spawn {
     struct Exec: ParsableCommand {
         static let configuration = CommandConfiguration(
             abstract: "Execute a command in a running container."

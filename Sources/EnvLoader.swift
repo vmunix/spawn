@@ -34,6 +34,14 @@ enum EnvLoader: Sendable {
         return env
     }
 
+    /// Parse a single KEY=VALUE string. Returns nil if no `=` found.
+    static func parseKeyValue(_ string: String) -> (key: String, value: String)? {
+        guard let eqIndex = string.firstIndex(of: "=") else { return nil }
+        let key = String(string[string.startIndex..<eqIndex])
+        let value = String(string[string.index(after: eqIndex)...])
+        return (key, value)
+    }
+
     /// Returns the names of any required keys missing from `env`.
     static func validateRequired(_ required: [String], in env: [String: String]) -> [String] {
         required.filter { env[$0] == nil }

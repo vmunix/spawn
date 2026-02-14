@@ -3,10 +3,18 @@ import Foundation
 /// Invokes Apple's `container` CLI to run, exec, and manage containers.
 enum ContainerRunner: Sendable {
     static let containerPath: String = {
-        for path in ["/opt/homebrew/bin/container", "/usr/local/bin/container"] {
-            if FileManager.default.fileExists(atPath: path) { return path }
+        if let envPath = ProcessInfo.processInfo.environment["CONTAINER_PATH"] {
+            logger.debug("Using container path from CONTAINER_PATH: \(envPath)")
+            return envPath
         }
-        return "container"  // hope it's on PATH
+        for path in ["/opt/homebrew/bin/container", "/usr/local/bin/container"] {
+            if FileManager.default.fileExists(atPath: path) {
+                logger.debug("Found container CLI at \(path)")
+                return path
+            }
+        }
+        logger.debug("Container CLI not found at known paths, falling back to PATH lookup")
+        return "container"
     }()
 
     /// Build the argument array for `container run`. Pure function — no side effects.

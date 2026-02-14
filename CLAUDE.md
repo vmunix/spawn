@@ -79,7 +79,8 @@ Tests use Apple's `swift-testing` framework (added as an explicit package depend
 | `ToolchainDetector.swift` | Priority-ordered detection chain, delegates to `DevcontainerParser` |
 | `DevcontainerParser.swift` | Parses devcontainer.json: image, build.dockerfile, features, containerEnv |
 | `MountResolver.swift` | Builds mount list from target + additional + read-only + git/SSH + agent credential state |
-| `EnvLoader.swift` | Parses KEY=VALUE files (comments, quotes), validates required vars |
+| `SpawnError.swift` | Structured runtime error type (containerFailed, containerNotFound, imageNotFound, runtimeError) |
+| `EnvLoader.swift` | Parses KEY=VALUE files (comments, quotes), validates required vars, `parseKeyValue(_:)` utility |
 | `ContainerRunner.swift` | `buildArgs()` pure function + `run()` via execv/Process + `runRaw()` passthrough |
 | `ImageResolver.swift` | `Toolchain` → `"spawn-{toolchain}:latest"`, validates via OCI Reference |
 | `ImageChecker.swift` | Pre-flight image existence check against container CLI's image store |

@@ -1,7 +1,7 @@
 import ArgumentParser
 import Foundation
 
-extension CCC {
+extension Spawn {
     struct List: ParsableCommand {
         static let configuration = CommandConfiguration(
             abstract: "List running containers."

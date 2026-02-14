@@ -1,7 +1,7 @@
 import ArgumentParser
 
 @main
-struct CCC: AsyncParsableCommand {
+struct Spawn: AsyncParsableCommand {
     static let configuration = CommandConfiguration(
         commandName: "spawn",
         abstract: "Sandboxed AI coding agents on macOS.",

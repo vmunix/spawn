@@ -1,5 +1,17 @@
 /// Embedded Containerfile strings for each toolchain, so `spawn build` works without repo files.
 enum ContainerfileTemplates: Sendable {
+    /// The Go release version used in the go Containerfile template.
+    private static let goVersion = "1.24.0"
+
+    /// The host architecture mapped to Go's naming convention (`arm64` or `amd64`).
+    private static let goArch: String = {
+        #if arch(arm64)
+        return "arm64"
+        #else
+        return "amd64"
+        #endif
+    }()
+
     /// Returns the Containerfile content for the given toolchain.
     static func content(for toolchain: Toolchain) -> String {
         switch toolchain {
@@ -68,8 +80,7 @@ enum ContainerfileTemplates: Sendable {
         FROM spawn-base:latest
 
         USER root
-        ARG GO_VERSION=1.23.6
-        RUN curl -fsSL "https://go.dev/dl/go${GO_VERSION}.linux-arm64.tar.gz" | tar -C /usr/local -xz
+        RUN curl -fsSL "https://go.dev/dl/go\(goVersion).linux-\(goArch).tar.gz" | tar -C /usr/local -xz
         ENV PATH="/usr/local/go/bin:/home/coder/go/bin:${PATH}"
         USER coder
         """

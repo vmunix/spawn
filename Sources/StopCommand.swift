@@ -1,7 +1,7 @@
 import ArgumentParser
 import Foundation
 
-extension CCC {
+extension Spawn {
     struct Stop: ParsableCommand {
         static let configuration = CommandConfiguration(
             abstract: "Stop a running container."

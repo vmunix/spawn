@@ -1,6 +1,5 @@
 import ContainerizationOCI
 import Foundation
-import Logging
 
 /// Pre-flight check against the `container` CLI's local image store.
 enum ImageChecker: Sendable {

@@ -1,7 +1,7 @@
 import ArgumentParser
 import Foundation
 
-extension CCC {
+extension Spawn {
     struct Build: ParsableCommand {
         static let configuration = CommandConfiguration(
             abstract: "Build or pull base images."
