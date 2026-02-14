@@ -7,7 +7,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ```bash
 swift build                          # Debug build
 swift build -c release               # Release build
-swift test                           # Run all 41 tests
+swift test                           # Run all 43 tests
 swift test --filter ToolchainDetector  # Run tests in one file
 swift test --filter "detectsRust"    # Run a single test by name
 swift run ccc .                      # Run from source (defaults to claude-code agent)
@@ -31,10 +31,9 @@ RunCommand.run()
   → AgentProfile.named()          # Validate agent (claude-code/codex)
   → ToolchainDetector.detect()    # Auto-detect or use override
   → ImageResolver.resolve()       # Map toolchain to image name
-  → MountResolver.resolve()       # Build mount list (workspace + git/SSH)
-  → EnvLoader.load/loadDefault()  # Load API keys from ~/.ccc/env
-  → EnvLoader.validateRequired()  # Check required vars per agent
-  → ContainerRunner.run()         # Build args, exec process, forward signals
+  → MountResolver.resolve()       # Build mount list (workspace + git/SSH + agent state)
+  → EnvLoader.load/loadDefault()  # Load env vars from ~/.ccc/env
+  → ContainerRunner.run()         # Build args, execv (TTY) or Process (pipe)
 ```
 
 ### Toolchain Detection Priority
@@ -49,12 +48,14 @@ RunCommand.run()
 
 ### Key Design Decisions
 
-- **All container interaction goes through Apple's `container` CLI** (auto-detected at `/opt/homebrew/bin/container` or `/usr/local/bin/container`, falling back to PATH). `ContainerRunner` constructs argument arrays and invokes it via `Foundation.Process`.
+- **All container interaction goes through Apple's `container` CLI** (auto-detected at `/opt/homebrew/bin/container` or `/usr/local/bin/container`, falling back to PATH). `ContainerRunner` constructs argument arrays and invokes it.
 - **`ContainerRunner.buildArgs()` is a pure function** — takes all inputs, returns `[String]`. This is what tests verify. The actual process execution (`ContainerRunner.run()`) is not unit tested since it requires the container runtime.
-- **Apple's `container` CLI (v0.9.0) does not support TTY allocation** (`-t` flag fails). We use `-i` (interactive stdin) only.
-- **`--shell` mode skips API key validation** — useful for debugging containers without setting up `~/.ccc/env`.
+- **TTY via `execv`**: When stdin is a real terminal, `ContainerRunner.run()` uses `execv` to replace the ccc process with `container`, giving it direct TTY access (required for `-t` flag and interactive I/O). When stdin is a pipe, it falls back to `Foundation.Process` with signal forwarding.
+- **Agents run in sandbox mode**: Claude Code gets `--dangerously-skip-permissions`, Codex gets `--full-auto` — the container is the sandbox.
+- **OAuth credential persistence**: Agent credentials are stored in `~/.ccc/state/<agent>/` on the host, mounted into containers so users authenticate once. No API keys required for Pro/Max plan users.
+- **VirtioFS limitation**: Single-file bind mounts don't support atomic rename (EBUSY). `~/.claude.json` is a symlink into a directory mount (`~/.claude-state/`) to work around this.
 - **Containerfile content is embedded in `ContainerfileTemplates.swift`** as string literals so `ccc build` works after installation (no dependency on repo file paths).
-- **Signal forwarding**: `ContainerRunner.run()` uses `DispatchSource.makeSignalSource` to forward SIGINT/SIGTERM to the child container process, then restores default handlers.
+- **Claude Code uses the native installer** (not npm) — installed as `coder` user at `/home/coder/.local/bin/claude`.
 
 ## Testing
 
@@ -72,9 +73,9 @@ Tests use Apple's `swift-testing` framework (added as an explicit package depend
 | `Types.swift` | `Toolchain` enum, `Mount` struct (two initializers: auto-derive guest path, or custom), `AgentProfile` |
 | `ToolchainDetector.swift` | Priority-ordered detection chain, delegates to `DevcontainerParser` |
 | `DevcontainerParser.swift` | Parses devcontainer.json: image, build.dockerfile, features, containerEnv |
-| `MountResolver.swift` | Builds mount list from target + additional + read-only + optional git/SSH |
+| `MountResolver.swift` | Builds mount list from target + additional + read-only + git/SSH + agent credential state |
 | `EnvLoader.swift` | Parses KEY=VALUE files (comments, quotes), validates required vars |
-| `ContainerRunner.swift` | `buildArgs()` pure function + `run()` with signal forwarding + `runRaw()` passthrough |
+| `ContainerRunner.swift` | `buildArgs()` pure function + `run()` via execv/Process + `runRaw()` passthrough |
 | `ImageResolver.swift` | `Toolchain` → `"ccc-{toolchain}:latest"`, with override support |
 | `ContainerfileTemplates.swift` | Embedded Containerfile strings for base/cpp/rust/go |
 | `BuildCommand.swift` | Writes embedded template to temp file, invokes `container build`, enforces base-first ordering |
