@@ -35,6 +35,7 @@ The `run` subcommand (default) orchestrates all modules in sequence:
 ```
 RunCommand.run()
   → AgentProfile.named()          # Validate agent (claude-code/codex)
+  → SettingsSeeder.seed()         # Seed safe-mode permissions (claude-code only)
   → ToolchainDetector.detect()    # Auto-detect or use override
   → ImageResolver.resolve()       # Map toolchain to image name
   → MountResolver.resolve()       # Build mount list (workspace + git/SSH + agent state)
@@ -57,7 +58,7 @@ RunCommand.run()
 - **All container interaction goes through Apple's `container` CLI** (auto-detected at `/opt/homebrew/bin/container` or `/usr/local/bin/container`, falling back to PATH; overridable via `CONTAINER_PATH` env var). `ContainerRunner` constructs argument arrays and invokes it.
 - **`ContainerRunner.buildArgs()` is a pure function** — takes all inputs, returns `[String]`. This is what tests verify. The actual process execution (`ContainerRunner.run()`) is not unit tested since it requires the container runtime.
 - **TTY via `execv`**: When stdin is a real terminal, `ContainerRunner.run()` uses `execv` to replace the spawn process with `container`, giving it direct TTY access (required for `-t` flag and interactive I/O). When stdin is a pipe, it falls back to `Foundation.Process` with signal forwarding.
-- **Agents run in sandbox mode**: Claude Code gets `--dangerously-skip-permissions`, Codex gets `--full-auto` — the container is the sandbox.
+- **Safe mode is the default**: Claude Code runs without `--dangerously-skip-permissions` and gets a seeded settings.json with deny rules for remote-write git/gh operations. Codex keeps `--full-auto` but git/gh wrapper scripts in the container intercept and prompt for remote-write operations. The `--yolo` flag restores full-auto behavior for both agents.
 - **OAuth credential persistence**: Agent credentials are stored in `~/.local/state/spawn/<agent>/` on the host, mounted into containers so users authenticate once. No API keys required for Pro/Max plan users.
 - **VirtioFS limitation**: Single-file bind mounts don't support atomic rename (EBUSY). `~/.claude.json` is a symlink into a directory mount (`~/.claude-state/`) to work around this.
 - **Containerfile content is embedded in `ContainerfileTemplates.swift`** as string literals so `spawn build` works after installation (no dependency on repo file paths).
@@ -100,6 +101,7 @@ Each fixture is a minimal but buildable/testable project. Spawn auto-detects the
 | `Log.swift` | Shared `Logger` instance (swift-log), bootstrapped to stderr, default level `.warning` |
 | `MountResolver.swift` | Builds mount list; copies git/SSH with symlink filtering and 0600 permissions on private keys |
 | `Paths.swift` | XDG Base Directory path resolution (configDir, stateDir) |
+| `SettingsSeeder.swift` | Seeds Claude Code's settings.json with safe-mode permission rules (allow local ops, deny remote-write git/gh) |
 | `SpawnError.swift` | Structured runtime error type (containerFailed, containerNotFound, imageNotFound, runtimeError) |
 | `ToolchainDetector.swift` | Priority-ordered detection chain, delegates to `DevcontainerParser` |
 | `Types.swift` | `Toolchain` enum, `Mount` struct (two initializers: auto-derive guest path, or custom), `AgentProfile` |
