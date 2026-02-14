@@ -28,3 +28,18 @@ import Testing
     #expect(content.contains("FROM spawn-base:latest"))
     #expect(content.contains("go.dev"))
 }
+
+@Test func goContainerfileContainsVersionedURL() {
+    let content = ContainerfileTemplates.content(for: .go)
+    #expect(content.contains("go1.24.0.linux-"))
+}
+
+@Test func goContainerfileContainsArchitecture() {
+    let content = ContainerfileTemplates.content(for: .go)
+    #expect(content.contains("linux-arm64") || content.contains("linux-amd64"))
+}
+
+@Test func goContainerfileDoesNotContainARGDirective() {
+    let content = ContainerfileTemplates.content(for: .go)
+    #expect(!content.contains("ARG GO_VERSION"))
+}

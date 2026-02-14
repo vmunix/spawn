@@ -48,3 +48,8 @@ import Testing
     let exists = ImageChecker.imageExists("spawn-base:latest", storeRoot: dir)
     #expect(exists == false)
 }
+
+@Test func returnsFalseWhenStoreRootIsNil() {
+    let exists = ImageChecker.imageExists("spawn-base:latest", storeRoot: nil)
+    #expect(exists == false)
+}

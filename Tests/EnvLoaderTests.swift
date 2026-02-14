@@ -46,3 +46,26 @@ import Testing
     let missing = EnvLoader.validateRequired(["ANTHROPIC_API_KEY"], in: env)
     #expect(missing.isEmpty)
 }
+
+@Test func parseKeyValueSplitsOnFirstEquals() {
+    let result = EnvLoader.parseKeyValue("FOO=bar")
+    #expect(result?.key == "FOO")
+    #expect(result?.value == "bar")
+}
+
+@Test func parseKeyValueReturnsNilWithoutEquals() {
+    let result = EnvLoader.parseKeyValue("FOOBAR")
+    #expect(result == nil)
+}
+
+@Test func parseKeyValueHandlesEqualsInValue() {
+    let result = EnvLoader.parseKeyValue("FOO=bar=baz")
+    #expect(result?.key == "FOO")
+    #expect(result?.value == "bar=baz")
+}
+
+@Test func parseKeyValueHandlesEmptyValue() {
+    let result = EnvLoader.parseKeyValue("FOO=")
+    #expect(result?.key == "FOO")
+    #expect(result?.value == "")
+}
