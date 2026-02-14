@@ -99,6 +99,11 @@ extension Spawn {
                 resolvedToolchain = ToolchainDetector.detect(in: path) ?? .base
             }
 
+            // Tell the user what we detected
+            if toolchain == nil {
+                print("Detected toolchain: \(resolvedToolchain.rawValue)")
+            }
+
             // Resolve image
             let resolvedImage = try ImageResolver.resolve(
                 toolchain: resolvedToolchain,
