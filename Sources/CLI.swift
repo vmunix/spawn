@@ -1,5 +1,4 @@
 import ArgumentParser
-import Foundation
 
 @main
 struct CCC: AsyncParsableCommand {
@@ -7,7 +6,7 @@ struct CCC: AsyncParsableCommand {
         commandName: "ccc",
         abstract: "Sandboxed AI coding agents on macOS.",
         version: "0.1.0",
-        subcommands: [Run.self],
+        subcommands: [Run.self, Build.self, List.self, Stop.self, Exec.self],
         defaultSubcommand: Run.self
     )
 }
