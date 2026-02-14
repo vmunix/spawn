@@ -100,6 +100,7 @@ Each fixture is a minimal but buildable/testable project. Spawn auto-detects the
 | `CLI.swift` | `@main` entry point, `Spawn` root command with subcommand registration |
 | `ContainerfileTemplates.swift` | Embedded Containerfile strings for base/cpp (clang-21)/rust/go; parameterized version constants |
 | `BuildCommand.swift` | Writes embedded template to temp file, invokes `container build`, enforces base-first ordering |
+| `ImageCommand.swift` | `spawn image` group: `list` (default, filters to spawn-*), `rm` (with safety validation) |
 | `Log.swift` | Shared `Logger` instance (swift-log), bootstrapped to stderr, default level `.warning` |
 
 ## Coding Conventions
