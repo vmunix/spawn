@@ -82,6 +82,46 @@ Tests use Apple's `swift-testing` framework (added as an explicit package depend
 | `ContainerfileTemplates.swift` | Embedded Containerfile strings for base/cpp/rust/go |
 | `BuildCommand.swift` | Writes embedded template to temp file, invokes `container build`, enforces base-first ordering |
 
+## Coding Conventions
+
+Aligned with Apple's `container` and `containerization` repos for consistency as we integrate the library.
+
+### Formatting
+
+Use `.swift-format` (config in repo root). Key rules:
+- **Import ordering:** alphabetical, enforced by formatter
+- **Trailing commas:** always, for cleaner diffs
+- **Early exits:** prefer `guard` over nested `if`
+- **Never force unwrap or force try** — use `guard let`, `try?`, or propagate errors
+- **File-scoped privacy:** default to `private` for file-scoped declarations, explicit `public` on APIs
+- **Line length:** 180 characters max
+
+### Sendable
+
+Mark all types `Sendable` explicitly. Structs with `Sendable` members get it automatically, but declare it anyway for clarity. When wrapping non-Sendable resources, use `nonisolated(unsafe)` with `NSLock` protection.
+
+### Error Handling
+
+Use a structured error type with code classification rather than bare `ValidationError` from ArgumentParser:
+- Runtime errors (image not found, container failure) should use a dedicated `SpawnError` type
+- `ValidationError` is reserved for CLI argument validation only
+- Include context: error code, message, and optional cause
+
+### Documentation
+
+Document public types and non-obvious functions with `///` comments. Focus on:
+- Protocol requirements (parameter docs, throws/returns)
+- Non-obvious behavior or workarounds
+- Module-level type descriptions
+- Skip trivial getters/setters and self-evident code
+
+### Future Patterns
+
+As spawn grows, adopt these patterns from the containerization library:
+- **Configuration structs with builder closures** for complex initialization (e.g., container config)
+- **Private state enums** with associated values for lifecycle management (e.g., VM states)
+- **swift-log** with a custom `StderrLogHandler` to replace manual stderr writes in `--verbose` mode
+
 ## Migration Path
 
 spawn is gradually migrating from shelling out to Apple's `container` CLI toward using the `containerization` Swift library directly.
