@@ -34,7 +34,6 @@ struct Mount: Sendable {
 
 struct AgentProfile: Sendable {
     let name: String
-    let defaultImagePrefix: String
     let entrypoint: [String]
     let requiredEnvVars: [String]
     let defaultCPUs: Int
@@ -42,7 +41,6 @@ struct AgentProfile: Sendable {
 
     static let claudeCode = AgentProfile(
         name: "claude-code",
-        defaultImagePrefix: "ccc",
         entrypoint: ["claude"],
         requiredEnvVars: ["ANTHROPIC_API_KEY"],
         defaultCPUs: 4,
@@ -51,7 +49,6 @@ struct AgentProfile: Sendable {
 
     static let codex = AgentProfile(
         name: "codex",
-        defaultImagePrefix: "ccc",
         entrypoint: ["codex"],
         requiredEnvVars: ["OPENAI_API_KEY"],
         defaultCPUs: 4,

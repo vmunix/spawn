@@ -28,16 +28,23 @@ extension CCC {
             for tc in toolchains {
                 print("Building ccc-\(tc.rawValue)...")
                 let imageName = "ccc-\(tc.rawValue):latest"
-                let containerfilePath = "Images/\(tc.rawValue)/Containerfile"
+
+                // Write embedded Containerfile to a temp file
+                let tmpContainerfile = FileManager.default.temporaryDirectory
+                    .appendingPathComponent("ccc-Containerfile-\(tc.rawValue)")
+                try ContainerfileTemplates.content(for: tc)
+                    .write(to: tmpContainerfile, atomically: true, encoding: .utf8)
 
                 let process = Process()
                 process.executableURL = URL(fileURLWithPath: ContainerRunner.containerPath)
-                process.arguments = ["build", "-t", imageName, "-f", containerfilePath, "."]
+                process.arguments = ["build", "-t", imageName, "-f", tmpContainerfile.path, "."]
                 process.standardOutput = verbose ? FileHandle.standardOutput : nil
                 process.standardError = FileHandle.standardError
 
                 try process.run()
                 process.waitUntilExit()
+
+                try? FileManager.default.removeItem(at: tmpContainerfile)
 
                 if process.terminationStatus != 0 {
                     throw ExitCode(process.terminationStatus)

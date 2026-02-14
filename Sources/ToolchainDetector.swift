@@ -70,14 +70,7 @@ enum ToolchainDetector {
     }
 
     private static func parseDevcontainer(at url: URL) -> Toolchain? {
-        guard let data = try? Data(contentsOf: url),
-              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let image = json["image"] as? String else { return nil }
-
-        let lower = image.lowercased()
-        if lower.contains("rust") { return .rust }
-        if lower.contains("go") { return .go }
-        if lower.contains("cpp") || lower.contains("c++") { return .cpp }
-        return .base
+        guard let config = DevcontainerConfig.parse(at: url) else { return nil }
+        return config.toolchain
     }
 }
