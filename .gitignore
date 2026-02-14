@@ -1,2 +1,6 @@
 .build/
 .swiftpm/
+
+# Fixture build artifacts
+fixtures/go-sample/go-sample
+fixtures/rust-sample/target/
