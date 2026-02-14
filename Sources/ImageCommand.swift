@@ -69,7 +69,27 @@ extension Spawn {
             @Argument(help: "Image names to remove (e.g. spawn-cpp:latest).")
             var names: [String]
 
+            /// Validate an image name for safe removal. Returns nil if valid,
+            /// or an error message if the name should be rejected.
+            static func validateRemoval(_ name: String) -> String? {
+                guard name.hasPrefix("spawn-") else {
+                    return "Refusing to remove '\(name)': only spawn-* images can be removed."
+                }
+                // Warn against removing base since other images depend on it
+                if name == "spawn-base:latest" || name == "spawn-base" {
+                    return "Refusing to remove '\(name)': other spawn images depend on it. Remove dependent images first."
+                }
+                return nil
+            }
+
             mutating func run() throws {
+                // Validate all names before removing any
+                for name in names {
+                    if let error = Self.validateRemoval(name) {
+                        throw ValidationError(error)
+                    }
+                }
+
                 for name in names {
                     let status = try ContainerRunner.runRaw(args: ["image", "delete", name])
                     if status != 0 {
