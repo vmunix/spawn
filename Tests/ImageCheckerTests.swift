@@ -73,7 +73,7 @@ import Testing
                 }
             }
         }
-        """,
+        """
     ])
     #expect(ImageChecker.isStale("spawn-go:latest", storeRoot: dir) == true)
 }
@@ -95,7 +95,7 @@ import Testing
                 }
             }
         }
-        """,
+        """
     ])
     #expect(ImageChecker.isStale("spawn-rust:latest", storeRoot: dir) == false)
 }
@@ -111,7 +111,7 @@ import Testing
                 }
             }
         }
-        """,
+        """
     ])
     #expect(ImageChecker.isStale("spawn-go:latest", storeRoot: dir) == false)
 }
@@ -133,7 +133,7 @@ import Testing
                 }
             }
         }
-        """,
+        """
     ])
     #expect(ImageChecker.isStale("spawn-cpp:latest", storeRoot: dir) == false)
 }
@@ -149,7 +149,7 @@ import Testing
                 }
             }
         }
-        """,
+        """
     ])
     #expect(ImageChecker.isStale("spawn-base:latest", storeRoot: dir) == false)
 }
@@ -165,7 +165,7 @@ import Testing
                 "digest": "sha256:bbb"
             }
         }
-        """,
+        """
     ])
     #expect(ImageChecker.isStale("spawn-go:latest", storeRoot: dir) == false)
 }
