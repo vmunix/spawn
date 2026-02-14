@@ -9,7 +9,7 @@ import Testing
     #expect(toolchain == .rust)
 
     // Resolve image
-    let image = ImageResolver.resolve(toolchain: toolchain ?? .base, imageOverride: nil)
+    let image = try ImageResolver.resolve(toolchain: toolchain ?? .base, imageOverride: nil)
     #expect(image == "spawn-rust:latest")
 
     // Resolve mounts
@@ -41,7 +41,7 @@ import Testing
     let toolchain = ToolchainDetector.detect(in: target)
     #expect(toolchain == .go)
 
-    let image = ImageResolver.resolve(toolchain: toolchain ?? .base, imageOverride: nil)
+    let image = try ImageResolver.resolve(toolchain: toolchain ?? .base, imageOverride: nil)
     #expect(image == "spawn-go:latest")
 
     let args = ContainerRunner.buildArgs(

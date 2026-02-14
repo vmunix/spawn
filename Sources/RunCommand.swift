@@ -67,7 +67,7 @@ extension CCC {
             }
 
             // Resolve image
-            let resolvedImage = ImageResolver.resolve(
+            let resolvedImage = try ImageResolver.resolve(
                 toolchain: resolvedToolchain,
                 imageOverride: image
             )
