@@ -7,8 +7,7 @@ enum EnvLoader {
     }
 
     static func loadDefault() -> [String: String] {
-        let home = FileManager.default.homeDirectoryForCurrentUser
-        let defaultPath = home.appendingPathComponent(".spawn/env").path
+        let defaultPath = Paths.configDir.appendingPathComponent("env").path
         return (try? load(from: defaultPath)) ?? [:]
     }
 
