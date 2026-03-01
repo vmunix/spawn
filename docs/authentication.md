@@ -23,7 +23,7 @@ spawn . --shell
 gh auth login
 ```
 
-spawn copies your host `~/.config/gh/` directory into the container on each run, so if you've already authenticated `gh` on your Mac, it should work automatically.
+spawn copies your host `~/.config/gh/hosts.yml` and `config.yml` into the container on each run, so if you've already authenticated `gh` on your Mac, it should work automatically.
 
 ## API keys
 

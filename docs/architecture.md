@@ -44,12 +44,15 @@ The base image (`spawn-base:latest`) includes:
 ### Image management
 
 ```bash
-spawn build              # Build all images
+spawn build              # Build all images (4 CPUs, 8GB memory by default)
 spawn build base         # Build base only
 spawn build rust         # Build a toolchain image
+spawn build --memory 16g # Build with more memory if needed
 spawn image list         # List spawn images
 spawn image rm <name>    # Remove a spawn image
 ```
+
+The builder container defaults to 4 CPUs and 8GB memory (`--cpus` and `--memory` flags). Apple's `container build` defaults to only 2GB, which is insufficient for the Claude Code installer.
 
 Containerfile content is embedded in the `spawn` binary as string literals, so `spawn build` works after installation without depending on the source repository.
 
@@ -60,6 +63,7 @@ When you run `spawn .`, the following modules execute in sequence:
 ```
 RunCommand.run()
   → AgentProfile.named()          # Validate agent (claude-code/codex)
+  → SettingsSeeder.seed()         # Seed safe-mode permissions (claude-code only)
   → ToolchainDetector.detect()    # Auto-detect or use override
   → ImageResolver.resolve()       # Map toolchain to image name
   → MountResolver.resolve()       # Build mount list
