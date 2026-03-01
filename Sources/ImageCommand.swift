@@ -5,8 +5,7 @@ extension Spawn {
     struct Image: ParsableCommand {
         static let configuration = CommandConfiguration(
             abstract: "Manage spawn images.",
-            subcommands: [List.self, Remove.self],
-            defaultSubcommand: List.self
+            subcommands: [List.self, Remove.self]
         )
 
         struct List: ParsableCommand {

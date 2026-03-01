@@ -7,13 +7,13 @@ extension Spawn {
             abstract: "Build or pull base images."
         )
 
-        @Argument(help: "Toolchain to build: base, cpp, rust, go (default: all)")
+        @Argument(help: "Toolchain to build: base, cpp, rust, go. Omit to build all.")
         var toolchain: String?
 
-        @Option(name: .long, help: "CPU cores for builder.")
+        @Option(name: .long, help: "CPU cores for the builder container.")
         var cpus: Int = 4
 
-        @Option(name: .long, help: "Memory for builder (e.g., 8g).")
+        @Option(name: .long, help: "Builder container memory (e.g., 8g).")
         var memory: String = "8g"
 
         @Flag(name: .long, help: "Show build commands.")

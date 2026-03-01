@@ -8,12 +8,12 @@ extension Spawn {
         )
 
         @Argument(
-            help: "Directory to mount as workspace.",
+            help: "Directory to mount as workspace (e.g., '.').",
             transform: { URL(fileURLWithPath: $0).standardizedFileURL }
         )
         var path: URL
 
-        @Argument(help: "Agent: claude-code (default), codex")
+        @Argument(help: "Agent to run: claude-code, codex.")
         var agent: String = "claude-code"
 
         @Option(name: .long, help: "Additional directory to mount (repeatable).")
@@ -28,16 +28,16 @@ extension Spawn {
         @Option(name: .customLong("env-file"), help: "Path to env file.")
         var envFile: String?
 
-        @Option(name: .long, help: "Override base image.")
+        @Option(name: .long, help: "Override auto-selected container image.")
         var image: String?
 
-        @Option(name: .long, help: "Override toolchain: base, cpp, rust, go")
+        @Option(name: .long, help: "Override auto-detected toolchain: base, cpp, rust, go.")
         var toolchain: String?
 
-        @Option(name: .long, help: "CPU cores.")
+        @Option(name: .long, help: "CPU cores for the container.")
         var cpus: Int = 4
 
-        @Option(name: .long, help: "Memory (e.g., 8g).")
+        @Option(name: .long, help: "Container memory (e.g., 8g).")
         var memory: String = "8g"
 
         @Flag(name: .long, help: "Drop into shell instead of running agent.")
@@ -49,7 +49,7 @@ extension Spawn {
         @Flag(name: .long, help: "Show container commands.")
         var verbose: Bool = false
 
-        @Flag(name: .long, help: "Full auto mode — skip all permission gates.")
+        @Flag(name: .long, help: "Skip permission gates (default: safe mode, prompts before git push).")
         var yolo: Bool = false
 
         private static func validateDirectory(at path: String, label: String) throws {
