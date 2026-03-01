@@ -10,11 +10,11 @@ extension Spawn {
         @Argument(help: "Toolchain to build: base, cpp, rust, go (default: all)")
         var toolchain: String?
 
-        @Option(name: .short, help: "CPU cores for builder (default: 4).")
+        @Option(name: .long, help: "CPU cores for builder.")
         var cpus: Int = 4
 
-        @Option(name: .short, help: "Memory for builder, e.g. 4g (default: 4g).")
-        var memory: String = "4g"
+        @Option(name: .long, help: "Memory for builder (e.g., 8g).")
+        var memory: String = "8g"
 
         @Flag(name: .long, help: "Show build commands.")
         var verbose: Bool = false
