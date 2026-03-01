@@ -5,7 +5,6 @@ import Testing
 @Test func mountFromHostPath() {
     let mount = Mount(hostPath: "/Users/me/code/project", readOnly: false)
     #expect(mount.guestPath == "/workspace/project")
-    #expect(mount.name == "project")
 }
 
 @Test func mountFromHostPathReadOnly() {
@@ -16,7 +15,7 @@ import Testing
 
 @Test func mountHandlesTrailingSlash() {
     let mount = Mount(hostPath: "/Users/me/code/project/", readOnly: false)
-    #expect(mount.name == "project")
+    #expect(mount.guestPath == "/workspace/project")
 }
 
 @Test func toolchainFromString() {

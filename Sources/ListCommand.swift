@@ -8,15 +8,10 @@ extension Spawn {
         )
 
         mutating func run() throws {
-            try ContainerRunner.preflight()
-
-            let process = Process()
-            process.executableURL = URL(fileURLWithPath: ContainerRunner.containerPath)
-            process.arguments = ["list"]
-            process.standardOutput = FileHandle.standardOutput
-            process.standardError = FileHandle.standardError
-            try process.run()
-            process.waitUntilExit()
+            let status = try ContainerRunner.runRaw(args: ["list"])
+            if status != 0 {
+                throw ExitCode(status)
+            }
         }
     }
 }

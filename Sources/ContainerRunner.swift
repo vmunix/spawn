@@ -17,6 +17,9 @@ enum ContainerRunner: Sendable {
         return "container"
     }()
 
+    /// Tracks whether the default container path has passed preflight.
+    private nonisolated(unsafe) static var defaultPreflightPassed = false
+
     /// Verify the container CLI binary exists and responds before any container operation.
     ///
     /// Two-phase check:
@@ -29,6 +32,9 @@ enum ContainerRunner: Sendable {
     ///   `SpawnError.runtimeError` if the binary exits non-zero.
     static func preflight(containerPath path: String? = nil) throws {
         let binary = path ?? containerPath
+
+        // Skip re-checking the default path if it already passed.
+        if path == nil, defaultPreflightPassed { return }
 
         // Phase 1: If the path is absolute, check that it exists and is executable.
         if binary.contains("/") {
@@ -57,6 +63,8 @@ enum ContainerRunner: Sendable {
                     + "Reinstall Apple's container tool or check your CONTAINER_PATH setting."
             )
         }
+
+        if path == nil { defaultPreflightPassed = true }
     }
 
     /// Build the argument array for `container run`. Pure function — no side effects.
@@ -212,5 +220,24 @@ enum ContainerRunner: Sendable {
         try process.run()
         process.waitUntilExit()
         return process.terminationStatus
+    }
+
+    /// Run a command against the container CLI and capture its stdout.
+    static func runCapture(args: [String]) throws -> (status: Int32, output: String) {
+        try preflight()
+
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: containerPath)
+        process.arguments = args
+        let pipe = Pipe()
+        process.standardOutput = pipe
+        process.standardError = FileHandle.standardError
+        try process.run()
+
+        let data = pipe.fileHandleForReading.readDataToEndOfFile()
+        process.waitUntilExit()
+
+        let output = String(data: data, encoding: .utf8) ?? ""
+        return (process.terminationStatus, output)
     }
 }

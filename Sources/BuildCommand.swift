@@ -20,18 +20,15 @@ extension Spawn {
 
             let toolchains: [Toolchain]
             if let name = toolchain {
-                guard let tc = Toolchain(rawValue: name) else {
-                    throw ValidationError("Unknown toolchain: \(name). Use: base, cpp, rust, go.")
-                }
-                toolchains = [tc]
+                toolchains = [try Toolchain.parse(name)]
             } else {
                 // base must be built first since other images depend on it
                 toolchains = [.base] + Toolchain.allCases.filter { $0 != .base }
             }
 
             for tc in toolchains {
-                print("Building spawn-\(tc.rawValue)...")
-                let imageName = "spawn-\(tc.rawValue):latest"
+                let imageName = tc.imageName
+                print("Building \(imageName)...")
 
                 // Write embedded Containerfile to a temp file
                 let tmpContainerfile = FileManager.default.temporaryDirectory
@@ -39,19 +36,14 @@ extension Spawn {
                 try ContainerfileTemplates.content(for: tc)
                     .write(to: tmpContainerfile, atomically: true, encoding: .utf8)
 
-                let process = Process()
-                process.executableURL = URL(fileURLWithPath: ContainerRunner.containerPath)
-                process.arguments = ["build", "-t", imageName, "-f", tmpContainerfile.path, "."]
-                process.standardOutput = FileHandle.standardOutput
-                process.standardError = FileHandle.standardError
-
-                try process.run()
-                process.waitUntilExit()
+                let status = try ContainerRunner.runRaw(
+                    args: ["build", "-t", imageName, "-f", tmpContainerfile.path, "."]
+                )
 
                 try? FileManager.default.removeItem(at: tmpContainerfile)
 
-                if process.terminationStatus != 0 {
-                    throw ExitCode(process.terminationStatus)
+                if status != 0 {
+                    throw ExitCode(status)
                 }
                 print("Built \(imageName)")
             }

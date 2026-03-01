@@ -52,38 +52,30 @@ extension Spawn {
         @Flag(name: .long, help: "Full auto mode — skip all permission gates.")
         var yolo: Bool = false
 
+        private static func validateDirectory(at path: String, label: String) throws {
+            var isDir: ObjCBool = false
+            guard FileManager.default.fileExists(atPath: path, isDirectory: &isDir) else {
+                throw ValidationError("\(label) does not exist: \(path)")
+            }
+            guard isDir.boolValue else {
+                throw ValidationError("\(label) is not a directory: \(path)")
+            }
+        }
+
         mutating func run() async throws {
             if verbose { logger.logLevel = .debug }
 
             // Validate workspace path
-            var isDirectory: ObjCBool = false
-            guard FileManager.default.fileExists(atPath: path.path, isDirectory: &isDirectory) else {
-                throw ValidationError("Path does not exist: \(path.path)")
-            }
-            guard isDirectory.boolValue else {
-                throw ValidationError("Path is not a directory: \(path.path)")
-            }
+            try Self.validateDirectory(at: path.path, label: "Path")
 
             // Validate additional mount paths
             for mountPath in mount {
-                var isMountDir: ObjCBool = false
-                guard FileManager.default.fileExists(atPath: mountPath, isDirectory: &isMountDir) else {
-                    throw ValidationError("Mount path does not exist: \(mountPath)")
-                }
-                guard isMountDir.boolValue else {
-                    throw ValidationError("Mount path is not a directory: \(mountPath)")
-                }
+                try Self.validateDirectory(at: mountPath, label: "Mount path")
             }
 
             // Validate read-only mount paths
             for roPath in readOnlyMounts {
-                var isRODir: ObjCBool = false
-                guard FileManager.default.fileExists(atPath: roPath, isDirectory: &isRODir) else {
-                    throw ValidationError("Read-only mount path does not exist: \(roPath)")
-                }
-                guard isRODir.boolValue else {
-                    throw ValidationError("Read-only mount path is not a directory: \(roPath)")
-                }
+                try Self.validateDirectory(at: roPath, label: "Read-only mount path")
             }
 
             // Resolve agent profile
@@ -94,10 +86,7 @@ extension Spawn {
             // Resolve toolchain
             let resolvedToolchain: Toolchain
             if let override = toolchain {
-                guard let tc = Toolchain(rawValue: override) else {
-                    throw ValidationError("Unknown toolchain: \(override). Use: base, cpp, rust, go.")
-                }
-                resolvedToolchain = tc
+                resolvedToolchain = try Toolchain.parse(override)
             } else {
                 resolvedToolchain = ToolchainDetector.detect(in: path) ?? .base
             }
@@ -181,8 +170,8 @@ extension Spawn {
             // Determine entrypoint
             let entrypoint = shell ? ["/bin/bash"] : (yolo ? profile.yoloEntrypoint : profile.safeEntrypoint)
 
-            // Working directory
-            let workdir = "/workspace/\(path.lastPathComponent)"
+            // Working directory — derived from the primary mount's guest path
+            let workdir = resolvedMounts[0].guestPath
 
             // Run
             let status = try ContainerRunner.run(

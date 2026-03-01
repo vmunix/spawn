@@ -19,28 +19,18 @@ extension Spawn {
 
             mutating func run() throws {
                 if all {
-                    let process = Process()
-                    process.executableURL = URL(fileURLWithPath: ContainerRunner.containerPath)
-                    process.arguments = ["image", "list"]
-                    process.standardOutput = FileHandle.standardOutput
-                    process.standardError = FileHandle.standardError
-                    try process.run()
-                    process.waitUntilExit()
+                    let status = try ContainerRunner.runRaw(args: ["image", "list"])
+                    if status != 0 {
+                        throw ExitCode(status)
+                    }
                     return
                 }
 
-                let process = Process()
-                process.executableURL = URL(fileURLWithPath: ContainerRunner.containerPath)
-                process.arguments = ["image", "list"]
-                let pipe = Pipe()
-                process.standardOutput = pipe
-                process.standardError = FileHandle.standardError
-                try process.run()
+                let (status, output) = try ContainerRunner.runCapture(args: ["image", "list"])
+                if status != 0 {
+                    throw ExitCode(status)
+                }
 
-                let data = pipe.fileHandleForReading.readDataToEndOfFile()
-                process.waitUntilExit()
-
-                guard let output = String(data: data, encoding: .utf8) else { return }
                 let lines = output.components(separatedBy: "\n")
 
                 var found = false
