@@ -17,7 +17,7 @@ struct Spawn: AsyncParsableCommand {
               --shell                  Drop into a shell instead of running an agent
               --toolchain <name>       Override auto-detected toolchain (base/cpp/rust/go)
             """,
-        version: "0.1.1",
+        version: "0.1.2",
         subcommands: [Run.self, Build.self, Image.self, List.self, Stop.self, Exec.self],
         defaultSubcommand: Run.self
     )

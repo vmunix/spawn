@@ -160,7 +160,7 @@ As spawn grows, adopt these patterns from the containerization library:
 
 - **Homebrew (recommended):** `brew tap vmunix/tap && brew install spawn`. The formula lives in a dedicated tap repo at `github.com/vmunix/homebrew-tap` (local dev copy at `~/code/homebrew-tap/`). The formula builds from a GitHub release tarball with `swift build -c release --disable-sandbox` and installs the binary to the Homebrew prefix.
 - **From source:** `make install` builds a release binary and installs to `~/.local/bin/` (XDG-aligned, no sudo). The `PREFIX` variable can be overridden: `PREFIX=/usr/local make install`.
-- **Versioning:** The current version (`0.1.1`) is set in `CLI.swift` via `CommandConfiguration.version`.
+- **Versioning:** The current version (`0.1.2`) is set in `CLI.swift` via `CommandConfiguration.version`.
 - **Release workflow:** (1) Update version in `CLI.swift`, (2) `git tag vX.Y.Z && git push origin vX.Y.Z`, (3) `gh release create vX.Y.Z --title "vX.Y.Z" --notes "..."`, (4) `curl -sL https://github.com/vmunix/spawn/archive/refs/tags/vX.Y.Z.tar.gz | shasum -a 256`, (5) update `url` and `sha256` in `~/code/homebrew-tap/Formula/spawn.rb`, (6) commit and push the tap repo. Source-only builds for now; pre-built binaries via GitHub Actions is a future enhancement.
 
 ## Migration Path
