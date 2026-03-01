@@ -89,14 +89,14 @@ Each fixture is a minimal but buildable/testable project. Spawn auto-detects the
 
 | Module | Responsibility |
 |--------|---------------|
-| `BuildCommand.swift` | Writes embedded template to temp file, invokes `container build`, enforces base-first ordering |
+| `BuildCommand.swift` | Writes embedded template to temp file, invokes `container build` with `--cpus`/`--memory` flags (default 4/8g), enforces base-first ordering |
 | `CLI.swift` | `@main` entry point, `Spawn` root command with subcommand registration |
-| `ContainerRunner.swift` | `buildArgs()` pure function + `run()` via execv/Process + `runRaw()` passthrough; redacts env vars in debug logs |
+| `ContainerRunner.swift` | `buildArgs()` pure function + `run()` via execv/Process + `runRaw()` passthrough + `runCapture()` stdout capture; redacts env vars in debug logs; caches preflight result |
 | `ContainerfileTemplates.swift` | Embedded Containerfile strings for base/cpp (clang-21)/rust/go; parameterized version constants |
 | `DevcontainerParser.swift` | Parses devcontainer.json: image, build.dockerfile, features, containerEnv |
 | `EnvLoader.swift` | Parses KEY=VALUE files (comments, quotes), validates required vars, `parseKeyValue(_:)` utility |
 | `ImageChecker.swift` | Pre-flight image existence check against container CLI's image store |
-| `ImageCommand.swift` | `spawn image` group: `list` (default, filters to spawn-*), `rm` (safety-validated, spawn-* only) |
+| `ImageCommand.swift` | `spawn image` group: `list` (filters to spawn-*), `rm` (safety-validated, spawn-* only) |
 | `ImageResolver.swift` | `Toolchain` → `"spawn-{toolchain}:latest"`, validates via inline OCI regex |
 | `Log.swift` | Shared `Logger` instance (swift-log), bootstrapped to stderr, default level `.warning` |
 | `MountResolver.swift` | Builds mount list; copies git/SSH with symlink filtering and 0600 permissions on private keys |
@@ -104,7 +104,7 @@ Each fixture is a minimal but buildable/testable project. Spawn auto-detects the
 | `SettingsSeeder.swift` | Seeds Claude Code's settings.json with safe-mode permission rules (allow local ops, deny remote-write git/gh) |
 | `SpawnError.swift` | Structured runtime error type (containerFailed, containerNotFound, imageNotFound, runtimeError) |
 | `ToolchainDetector.swift` | Priority-ordered detection chain, delegates to `DevcontainerParser` |
-| `Types.swift` | `Toolchain` enum, `Mount` struct (two initializers: auto-derive guest path, or custom), `AgentProfile` |
+| `Types.swift` | `Toolchain` enum (with `imageName` and `parse()` helpers), `Mount` struct (two initializers: auto-derive guest path, or custom), `AgentProfile` |
 
 ## Coding Conventions
 
