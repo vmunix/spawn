@@ -2,6 +2,15 @@ import Foundation
 
 /// Builds the full mount list for a container run (workspace, git/SSH, agent state).
 enum MountResolver: Sendable {
+    /// Ensure a directory exists, logging a warning on failure.
+    private static func ensureDirectory(_ dir: URL, label: String, using fm: FileManager) {
+        do {
+            try fm.createDirectory(at: dir, withIntermediateDirectories: true)
+        } catch {
+            logger.warning("Failed to create \(label) directory \(dir.path): \(error.localizedDescription)")
+        }
+    }
+
     /// Resolve all mounts for the given target directory, agent, and options.
     /// Copies git/SSH configs to the XDG state dir to work around VirtioFS uid issues.
     static func resolve(
@@ -11,6 +20,8 @@ enum MountResolver: Sendable {
         includeGit: Bool,
         agent: String
     ) -> [Mount] {
+        let fm = FileManager.default
+        let stateDir = Paths.stateDir
         var mounts: [Mount] = []
 
         // Primary target
@@ -33,17 +44,12 @@ enum MountResolver: Sendable {
         // permissions, and mount the copies. The Containerfile has symlinks from
         // the expected paths into these mount points.
         if includeGit {
-            let home = FileManager.default.homeDirectoryForCurrentUser
-            let fm = FileManager.default
+            let home = fm.homeDirectoryForCurrentUser
 
             let gitconfig = home.appendingPathComponent(".gitconfig")
             if fm.fileExists(atPath: gitconfig.path) {
-                let gitDir = Paths.stateDir.appendingPathComponent("git")
-                do {
-                    try fm.createDirectory(at: gitDir, withIntermediateDirectories: true)
-                } catch {
-                    logger.warning("Failed to create git state directory \(gitDir.path): \(error.localizedDescription)")
-                }
+                let gitDir = stateDir.appendingPathComponent("git")
+                ensureDirectory(gitDir, label: "git state", using: fm)
                 let dest = gitDir.appendingPathComponent(".gitconfig")
                 try? fm.removeItem(at: dest)
                 do {
@@ -61,7 +67,7 @@ enum MountResolver: Sendable {
 
             let sshDir = home.appendingPathComponent(".ssh")
             if fm.fileExists(atPath: sshDir.path) {
-                let sshCopy = Paths.stateDir.appendingPathComponent("ssh")
+                let sshCopy = stateDir.appendingPathComponent("ssh")
                 // Fresh copy each run to pick up key changes.
                 // Copy files individually to skip sockets (SSH agent) and other non-regular files.
                 try? fm.removeItem(at: sshCopy)
@@ -80,19 +86,15 @@ enum MountResolver: Sendable {
                             continue
                         }
                         try fm.copyItem(at: src, to: sshCopy.appendingPathComponent(item))
-                    }
-                    // Set restrictive permissions on private key files
-                    let copiedFiles = try? fm.contentsOfDirectory(atPath: sshCopy.path)
-                    for file in copiedFiles ?? [] {
-                        // Public keys (.pub), known_hosts, and config are fine with default perms
-                        guard
-                            !file.hasSuffix(".pub") && file != "known_hosts"
-                                && file != "known_hosts.old" && file != "config"
-                        else {
-                            continue
+                        // Set restrictive permissions on private key files
+                        if !item.hasSuffix(".pub") && item != "known_hosts"
+                            && item != "known_hosts.old" && item != "config"
+                        {
+                            try? fm.setAttributes(
+                                [.posixPermissions: 0o600],
+                                ofItemAtPath: sshCopy.appendingPathComponent(item).path
+                            )
                         }
-                        let filePath = sshCopy.appendingPathComponent(file).path
-                        try? fm.setAttributes([.posixPermissions: 0o600], ofItemAtPath: filePath)
                     }
                 } catch {
                     logger.warning("Failed to copy .ssh files to container state: \(error.localizedDescription)")
@@ -105,13 +107,19 @@ enum MountResolver: Sendable {
                     ))
             }
 
-            // GitHub CLI auth config (~/.config/gh/)
+            // GitHub CLI auth config (~/.config/gh/) — only copy auth and config files
             let ghDir = home.appendingPathComponent(".config/gh")
             if fm.fileExists(atPath: ghDir.path) {
-                let ghCopy = Paths.stateDir.appendingPathComponent("gh")
+                let ghCopy = stateDir.appendingPathComponent("gh")
                 try? fm.removeItem(at: ghCopy)
                 do {
-                    try fm.copyItem(at: ghDir, to: ghCopy)
+                    try fm.createDirectory(at: ghCopy, withIntermediateDirectories: true)
+                    for file in ["hosts.yml", "config.yml"] {
+                        let src = ghDir.appendingPathComponent(file)
+                        if fm.fileExists(atPath: src.path) {
+                            try fm.copyItem(at: src, to: ghCopy.appendingPathComponent(file))
+                        }
+                    }
                 } catch {
                     logger.warning("Failed to copy gh config to container state: \(error.localizedDescription)")
                 }
@@ -126,12 +134,8 @@ enum MountResolver: Sendable {
 
         // Persistent agent credential state → /home/coder/.<agent-config-dir>
         // This lets OAuth tokens survive container restarts so users only auth once.
-        let agentStateDir = Paths.stateDir.appendingPathComponent(agent)
-        do {
-            try FileManager.default.createDirectory(at: agentStateDir, withIntermediateDirectories: true)
-        } catch {
-            logger.warning("Failed to create agent state directory \(agentStateDir.path): \(error.localizedDescription)")
-        }
+        let agentStateDir = stateDir.appendingPathComponent(agent)
+        ensureDirectory(agentStateDir, label: "agent state", using: fm)
 
         switch agent {
         case "claude-code":
@@ -141,12 +145,7 @@ enum MountResolver: Sendable {
             // atomic rename on bind-mounted files (EBUSY). Instead, we mount a directory at
             // ~/.claude-state/ and the Containerfile symlinks ~/.claude.json into it.
             let claudeDir = agentStateDir.appendingPathComponent("claude")
-            do {
-                try FileManager.default.createDirectory(at: claudeDir, withIntermediateDirectories: true)
-            } catch {
-                logger.warning(
-                    "Failed to create Claude config directory \(claudeDir.path): \(error.localizedDescription)")
-            }
+            ensureDirectory(claudeDir, label: "Claude config", using: fm)
             mounts.append(
                 Mount(
                     hostPath: claudeDir.path,
@@ -154,13 +153,7 @@ enum MountResolver: Sendable {
                     readOnly: false
                 ))
             let claudeStateDir = agentStateDir.appendingPathComponent("claude-state")
-            do {
-                try FileManager.default.createDirectory(at: claudeStateDir, withIntermediateDirectories: true)
-            } catch {
-                logger.warning(
-                    "Failed to create Claude state directory \(claudeStateDir.path): \(error.localizedDescription)"
-                )
-            }
+            ensureDirectory(claudeStateDir, label: "Claude state", using: fm)
             mounts.append(
                 Mount(
                     hostPath: claudeStateDir.path,
@@ -169,12 +162,7 @@ enum MountResolver: Sendable {
                 ))
         case "codex":
             let codexDir = agentStateDir.appendingPathComponent("codex")
-            do {
-                try FileManager.default.createDirectory(at: codexDir, withIntermediateDirectories: true)
-            } catch {
-                logger.warning(
-                    "Failed to create Codex state directory \(codexDir.path): \(error.localizedDescription)")
-            }
+            ensureDirectory(codexDir, label: "Codex state", using: fm)
             mounts.append(
                 Mount(
                     hostPath: codexDir.path,

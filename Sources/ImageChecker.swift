@@ -18,17 +18,37 @@ enum ImageChecker: Sendable {
         return appSupport.appendingPathComponent("com.apple.container")
     }()
 
-    /// Check whether an image reference exists in the container CLI's image store.
-    /// Returns false if the store can't be read (best-effort check).
-    static func imageExists(_ reference: String, storeRoot: URL? = nil) -> Bool {
-        guard let root = storeRoot ?? defaultStoreRoot else {
-            logger.warning("Unable to resolve Application Support directory; skipping image existence check")
-            return false
-        }
+    /// ISO8601 date formatters (with and without fractional seconds).
+    /// These are created once and only used from `createdTimestamp` which is called synchronously.
+    private nonisolated(unsafe) static let isoFormatterFractional: ISO8601DateFormatter = {
+        let f = ISO8601DateFormatter()
+        f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return f
+    }()
+
+    private nonisolated(unsafe) static let isoFormatterBasic: ISO8601DateFormatter = {
+        let f = ISO8601DateFormatter()
+        f.formatOptions = [.withInternetDateTime]
+        return f
+    }()
+
+    /// Load and parse state.json from the image store root.
+    private static func loadState(storeRoot: URL?) -> [String: Any]? {
+        guard let root = storeRoot ?? defaultStoreRoot else { return nil }
         let statePath = root.appendingPathComponent("state.json")
         guard let data = try? Data(contentsOf: statePath),
             let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
         else {
+            return nil
+        }
+        return json
+    }
+
+    /// Check whether an image reference exists in the container CLI's image store.
+    /// Returns false if the store can't be read (best-effort check).
+    static func imageExists(_ reference: String, storeRoot: URL? = nil) -> Bool {
+        guard let json = loadState(storeRoot: storeRoot) else {
+            logger.warning("Unable to read image store; skipping image existence check")
             return false
         }
         return json[reference] != nil
@@ -49,14 +69,7 @@ enum ImageChecker: Sendable {
         // Base can't be stale relative to itself.
         guard image != baseImage else { return false }
 
-        guard let root = storeRoot ?? defaultStoreRoot else { return false }
-
-        let statePath = root.appendingPathComponent("state.json")
-        guard let data = try? Data(contentsOf: statePath),
-            let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
-        else {
-            return false
-        }
+        guard let json = loadState(storeRoot: storeRoot) else { return false }
 
         guard let imageCreated = createdTimestamp(for: image, in: json),
             let baseCreated = createdTimestamp(for: baseImage, in: json)
@@ -76,13 +89,6 @@ enum ImageChecker: Sendable {
             return nil
         }
 
-        let formatter = ISO8601DateFormatter()
-        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        if let date = formatter.date(from: created) {
-            return date
-        }
-        // Retry without fractional seconds for simpler timestamps.
-        formatter.formatOptions = [.withInternetDateTime]
-        return formatter.date(from: created)
+        return isoFormatterFractional.date(from: created) ?? isoFormatterBasic.date(from: created)
     }
 }

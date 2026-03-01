@@ -1,3 +1,4 @@
+import ArgumentParser
 import Foundation
 
 /// Supported language toolchains, each corresponding to a container image variant.
@@ -6,6 +7,18 @@ enum Toolchain: String, CaseIterable, Sendable {
     case cpp
     case rust
     case go
+
+    /// The canonical container image name for this toolchain (e.g. `spawn-rust:latest`).
+    var imageName: String { "spawn-\(rawValue):latest" }
+
+    /// Parse a toolchain name string, throwing a clear error if invalid.
+    static func parse(_ name: String) throws -> Toolchain {
+        guard let tc = Toolchain(rawValue: name) else {
+            let valid = Toolchain.allCases.map(\.rawValue).joined(separator: ", ")
+            throw ValidationError("Unknown toolchain: \(name). Use: \(valid).")
+        }
+        return tc
+    }
 }
 
 /// A host-to-guest filesystem mount for the container.
@@ -27,10 +40,6 @@ struct Mount: Sendable {
         self.hostPath = hostPath
         self.guestPath = guestPath
         self.readOnly = readOnly
-    }
-
-    var name: String {
-        URL(fileURLWithPath: hostPath).standardizedFileURL.lastPathComponent
     }
 }
 

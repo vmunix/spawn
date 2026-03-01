@@ -15,7 +15,7 @@ enum ImageResolver: Sendable {
     /// Returns the image reference for the given toolchain, or validates and returns the override.
     /// Throws if the reference is not a well-formed OCI image name.
     static func resolve(toolchain: Toolchain, imageOverride: String?) throws -> String {
-        let name = imageOverride ?? "spawn-\(toolchain.rawValue):latest"
+        let name = imageOverride ?? toolchain.imageName
         // Reject bare 64-char hex strings (ambiguous with content digests)
         let isBareHex = name.count == 64 && name.allSatisfy { $0.isHexDigit }
         guard !isBareHex, name.count <= 255, isValidReference(name) else {
