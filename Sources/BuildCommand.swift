@@ -10,6 +10,12 @@ extension Spawn {
         @Argument(help: "Toolchain to build: base, cpp, rust, go (default: all)")
         var toolchain: String?
 
+        @Option(name: .short, help: "CPU cores for builder (default: 4).")
+        var cpus: Int = 4
+
+        @Option(name: .short, help: "Memory for builder, e.g. 4g (default: 4g).")
+        var memory: String = "4g"
+
         @Flag(name: .long, help: "Show build commands.")
         var verbose: Bool = false
 
@@ -37,7 +43,14 @@ extension Spawn {
                     .write(to: tmpContainerfile, atomically: true, encoding: .utf8)
 
                 let status = try ContainerRunner.runRaw(
-                    args: ["build", "-t", imageName, "-f", tmpContainerfile.path, "."]
+                    args: [
+                        "build",
+                        "-c", "\(cpus)",
+                        "-m", memory,
+                        "-t", imageName,
+                        "-f", tmpContainerfile.path,
+                        ".",
+                    ]
                 )
 
                 try? FileManager.default.removeItem(at: tmpContainerfile)
