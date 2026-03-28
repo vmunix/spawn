@@ -1,25 +1,25 @@
-# CLAUDE.md
+# AGENTS.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+This file provides guidance to Codex-style coding agents when working with code in this repository.
 
-Keep this file aligned with [AGENTS.md](AGENTS.md). Only agent-specific wording should differ.
+Keep this file aligned with [CLAUDE.md](CLAUDE.md). Only agent-specific wording should differ.
 
 ## Build & Test Commands
 
 ```bash
-swift build                          # Debug build
-swift build -c release               # Release build
-swift test                           # Run all tests
+swift build                            # Debug build
+swift build -c release                 # Release build
+swift test                             # Run all tests
 swift test --filter ToolchainDetector  # Run tests in one file
-swift test --filter "detectsRust"    # Run a single test by name
+swift test --filter "detectsRust"      # Run a single test by name
 swift run spawn .                      # Run from source (defaults to claude-code agent)
-swift run spawn . codex --verbose      # Run with verbose output showing container command
-make build                           # Release build
-make test                            # Lint + run tests
-make lint                            # Run swift-format linter
-make format                          # Auto-fix formatting in-place
-make smoke                           # End-to-end smoke tests (cpp/go/rust fixtures in containers)
-make install                         # Install to ~/.local/bin
+swift run spawn . codex --verbose      # Run Codex with verbose container output
+make build                             # Release build
+make test                              # Lint + run tests
+make lint                              # Run swift-format linter
+make format                            # Auto-fix formatting in-place
+make smoke                             # End-to-end smoke tests (cpp/go/rust fixtures in containers)
+make install                           # Install to ~/.local/bin
 ```
 
 ## Pre-commit
@@ -150,7 +150,7 @@ Uses [swift-log](https://github.com/apple/swift-log) with `StreamLogHandler.stan
 
 - **Mount paths are validated** — `--mount` and `--read-only` paths must exist and be directories
 - **SSH keys are copied, not mounted directly** — copied to XDG state dir with symlink filtering and 0600 permissions on private keys
-- **`spawn image rm` only removes `spawn-*` images** — protects base OS images and `spawn-base` (which other images depend on)
+- **`spawn image rm` only removes `spawn-*` images** — protects base OS images and `spawn-base` (which other images depend on it)
 - **Env var values are redacted in `--verbose` output** — prevents credential leakage in logs
 
 ### Future Patterns
