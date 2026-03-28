@@ -10,6 +10,7 @@ extension Spawn {
                   spawn .                         Run Claude Code in the current directory
                   spawn . codex                   Run Codex instead
                   spawn ~/code/project --shell    Open a shell in the workspace container
+                  spawn . --toolchain js          Force the JS/TS runtime image
                   spawn . --toolchain rust        Override auto-detection
                   spawn . --yolo                  Disable safe-mode prompts
 
@@ -42,7 +43,7 @@ extension Spawn {
         @Option(name: .long, help: "Override auto-selected container image.")
         var image: String?
 
-        @Option(name: .long, help: "Override auto-detected toolchain: base, cpp, rust, go.")
+        @Option(name: .long, help: "Override auto-detected toolchain: base, cpp, rust, go, js.")
         var toolchain: String?
 
         @Option(name: .long, help: "CPU cores for the container.")
@@ -83,19 +84,7 @@ extension Spawn {
             if toolchainWasOverridden {
                 toolchainDetail = "\(resolvedToolchain.rawValue) (--toolchain override)"
             } else {
-                toolchainDetail =
-                    switch detection.source {
-                    case .spawnToml:
-                        "\(resolvedToolchain.rawValue) (.spawn.toml)"
-                    case .devcontainer:
-                        "\(resolvedToolchain.rawValue) (.devcontainer/devcontainer.json)"
-                    case .dockerfile:
-                        "\(resolvedToolchain.rawValue) (workspace has Dockerfile/Containerfile)"
-                    case .cargo, .goMod, .cmake:
-                        "\(resolvedToolchain.rawValue) (auto-detected)"
-                    case .fallback:
-                        "\(resolvedToolchain.rawValue) (fallback)"
-                    }
+                toolchainDetail = "\(resolvedToolchain.rawValue) (\(detection.source.detail))"
             }
 
             return [

@@ -41,7 +41,7 @@ USAGE: spawn run <path> [<agent>] [options]
 | `--yolo` | Skip permission gates (default: safe mode, prompts before git push) |
 | `--shell` | Drop into shell instead of running agent |
 | `--no-git` | Don't mount git/SSH config into the container |
-| `--toolchain <name>` | Override auto-detected toolchain: `base`, `cpp`, `rust`, `go` |
+| `--toolchain <name>` | Override auto-detected toolchain: `base`, `cpp`, `rust`, `go`, `js` |
 | `--image <name>` | Override auto-selected container image |
 | `--mount <dir>` | Additional directory to mount (repeatable) |
 | `--read-only <dir>` | Mount directory read-only (repeatable) |
@@ -77,6 +77,7 @@ spawn . --env-file ~/.config/spawn/env
 
 # Override the auto-detected toolchain
 spawn . --toolchain rust
+spawn . --toolchain js
 
 # Override the container image entirely
 spawn . --image my-custom-image:latest
@@ -105,6 +106,7 @@ spawn build base       # Build the base image
 spawn build rust       # Build the Rust toolchain image
 spawn build cpp        # Build the C++ toolchain image
 spawn build go         # Build the Go toolchain image
+spawn build js         # Build the JS/TS toolchain image
 ```
 
 ### Options

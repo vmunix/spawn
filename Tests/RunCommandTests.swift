@@ -25,7 +25,7 @@ import Testing
     #expect(lines.contains("  workspace: /Users/me/code/project"))
     #expect(lines.contains("  agent: codex"))
     #expect(lines.contains("  mode: safe"))
-    #expect(lines.contains("  toolchain: rust (auto-detected)"))
+    #expect(lines.contains("  toolchain: rust (auto-detected from Cargo.toml/rust-toolchain.toml)"))
     #expect(lines.contains("  image: spawn-rust:latest"))
     #expect(lines.contains("  extra mounts: 2 read-write, 1 read-only"))
     #expect(lines.contains("  environment: 3 variables"))
@@ -55,6 +55,28 @@ import Testing
     #expect(lines.contains("  mode: yolo"))
     #expect(lines.contains("  git/ssh: disabled"))
     #expect(lines.contains("  environment: 1 variable"))
+}
+
+@Test func launchSummaryIncludesSpecificJavaScriptDetectionReason() {
+    let workspace = URL(fileURLWithPath: "/Users/me/code/project")
+    let lines = Spawn.Run.launchSummaryLines(
+        workspace: workspace,
+        agent: "claude-code",
+        shell: false,
+        yolo: false,
+        toolchainWasOverridden: false,
+        detection: ToolchainDetector.Inspection(toolchain: .js, source: .bunLock),
+        resolvedToolchain: .js,
+        image: "spawn-js:latest",
+        noGit: false,
+        extraMountCount: 0,
+        readOnlyMountCount: 0,
+        envCount: 0,
+        cpus: 4,
+        memory: "8g"
+    )
+
+    #expect(lines.contains("  toolchain: js (auto-detected from bun.lock/bun.lockb)"))
 }
 
 @Test func launchSummaryMarksToolchainOverrides() {

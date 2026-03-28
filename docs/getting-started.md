@@ -49,6 +49,7 @@ spawn build base
 spawn build rust
 spawn build cpp
 spawn build go
+spawn build js
 ```
 
 The builder container defaults to 4 CPUs and 8GB memory. If a build fails with an out-of-memory error, increase the allocation:
@@ -68,7 +69,7 @@ spawn .
 
 spawn will:
 
-1. Detect your project's toolchain from files like `Cargo.toml`, `go.mod`, or `CMakeLists.txt`
+1. Detect your project's toolchain from files like `Cargo.toml`, `go.mod`, `CMakeLists.txt`, `package.json`, `bun.lock`, or `deno.json`
 2. Select the matching container image (e.g., `spawn-rust:latest`)
 3. Mount your project directory read/write into the container
 4. Copy your git config and SSH keys into the container
@@ -93,3 +94,5 @@ To drop into a bash shell inside the container (useful for debugging):
 ```bash
 spawn . --shell
 ```
+
+If your project already has a `.devcontainer/devcontainer.json`, spawn uses that as an explicit signal before falling back to file-based heuristics. This makes existing VS Code devcontainer projects work nicely with spawn.

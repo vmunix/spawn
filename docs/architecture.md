@@ -28,6 +28,7 @@ spawn-base:latest
   ├── spawn-cpp:latest
   ├── spawn-rust:latest
   └── spawn-go:latest
+  └── spawn-js:latest
 ```
 
 ### Base image contents
@@ -41,12 +42,21 @@ The base image (`spawn-base:latest`) includes:
 - Safe-mode wrapper scripts for git/gh
 - Non-root `coder` user with sudo access
 
+### JS/TS image contents
+
+The JavaScript/TypeScript image (`spawn-js:latest`) extends the base image and adds:
+- Node.js 22 LTS
+- Corepack for pnpm/yarn workflows
+- Bun
+- Deno
+
 ### Image management
 
 ```bash
 spawn build              # Build all images (4 CPUs, 8GB memory by default)
 spawn build base         # Build base only
 spawn build rust         # Build a toolchain image
+spawn build js           # Build the JS/TS toolchain image
 spawn build --memory 16g # Build with more memory if needed
 spawn image list         # List spawn images
 spawn image rm <name>    # Remove a spawn image

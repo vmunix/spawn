@@ -14,7 +14,7 @@ spawn detects your project's language, picks the right container image, mounts y
 
 `spawn` wraps Apple's [`container`](https://github.com/apple/containerization) CLI to launch AI coding agents in lightweight Linux VMs.
 
-- **Auto-detects toolchains** — Rust (`Cargo.toml`), Go (`go.mod`), C++ (`CMakeLists.txt`), or falls back to a base image
+- **Auto-detects toolchains** — Rust, Go, C++, and JS/TS projects (Node, Bun, Deno), or falls back to a base image
 - **Safe mode by default** — prompts before `git push`, PR creation, and other remote-write operations
 - **Mounts git config and SSH keys** so the agent can commit and push
 - **Persists OAuth credentials** across runs — authenticate once, not every session
@@ -56,7 +56,7 @@ export PATH="$HOME/.local/bin:$PATH"
 spawn build
 
 # Or build just what you need
-spawn build rust    # also: base, cpp, go
+spawn build rust    # also: base, cpp, go, js
 
 # Run Claude Code in your project
 spawn .
@@ -84,7 +84,7 @@ spawn <path> [agent] [options]
 | `--yolo` | Skip permission gates (default: safe mode, prompts before git push) |
 | `--shell` | Drop into a shell instead of running an agent |
 | `--no-git` | Don't mount git/SSH config into the container |
-| `--toolchain <name>` | Override auto-detected toolchain: `base`, `cpp`, `rust`, `go` |
+| `--toolchain <name>` | Override auto-detected toolchain: `base`, `cpp`, `rust`, `go`, `js` |
 | `--image <name>` | Override auto-selected container image |
 | `--mount <dir>` | Mount an additional directory (repeatable) |
 | `--read-only <dir>` | Mount a directory read-only (repeatable) |
@@ -152,7 +152,19 @@ Add a `.spawn.toml` to your repo root to pin a toolchain:
 base = "rust"
 ```
 
-spawn also reads `.devcontainer/devcontainer.json` to infer toolchains from images and features.
+Valid values: `base`, `cpp`, `rust`, `go`, `js`.
+
+spawn also reads `.devcontainer/devcontainer.json` to infer toolchains from images and features. If a viable devcontainer config is present, spawn prefers that explicit signal over repo-file heuristics. This makes existing VS Code devcontainer projects work with zero extra setup.
+
+## Devcontainer support
+
+If your project already uses `.devcontainer/devcontainer.json`, spawn treats that as the strongest project signal after `.spawn.toml`.
+
+- devcontainer image/features are mapped to spawn toolchains
+- the launch summary and `spawn doctor` show when `.devcontainer/devcontainer.json` drove the choice
+- this makes spawn a good fit for projects already set up for VS Code Dev Containers
+
+For JS/TS repos, `spawn-js:latest` bundles Node.js 22 LTS, Corepack, Bun, and Deno so the common runtime and package-manager paths work out of the box.
 
 ## Documentation
 

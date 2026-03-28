@@ -7,6 +7,7 @@ enum Toolchain: String, CaseIterable, Sendable {
     case cpp
     case rust
     case go
+    case js
 
     /// The canonical container image name for this toolchain (e.g. `spawn-rust:latest`).
     var imageName: String { "spawn-\(rawValue):latest" }

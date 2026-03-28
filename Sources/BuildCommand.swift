@@ -9,13 +9,14 @@ extension Spawn {
                 Examples:
                   spawn build
                   spawn build rust
+                  spawn build js
                   spawn build base --memory 16g
 
                 Omit the toolchain to build all images. `spawn-base` is always built first.
                 """
         )
 
-        @Argument(help: "Toolchain to build: base, cpp, rust, go. Omit to build all.")
+        @Argument(help: "Toolchain to build: base, cpp, rust, go, js. Omit to build all.")
         var toolchain: String?
 
         @Option(name: .long, help: "CPU cores for the builder container.")

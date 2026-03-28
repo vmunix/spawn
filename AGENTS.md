@@ -52,7 +52,7 @@ RunCommand.run()
 1. `.spawn.toml` `[toolchain] base = "..."` — explicit config
 2. `.devcontainer/devcontainer.json` — parsed by `DevcontainerParser`
 3. `Dockerfile` / `Containerfile` in repo root — returns nil
-4. Auto-detect from repo files (`Cargo.toml` → rust, `go.mod` → go, `CMakeLists.txt` → cpp). Note: `Makefile` alone does not trigger cpp — it's too common across languages.
+4. Auto-detect from repo files (`Cargo.toml` → rust, `go.mod` → go, `CMakeLists.txt` → cpp, JS/TS markers like `bun.lock`, `deno.json`, `package.json` → js). Note: `Makefile` alone does not trigger cpp — it's too common across languages.
 5. Fallback → `.base`
 
 ### Key Design Decisions
@@ -85,6 +85,9 @@ Tests use Swift 6.3's built-in `Testing` framework.
 | `fixtures/cpp-sample/` | cpp (clang-21) | CMake + Ninja build, ctest |
 | `fixtures/go-sample/` | go | `go build` + `go test` |
 | `fixtures/rust-sample/` | rust | `cargo build` + `cargo test` |
+| `fixtures/node-sample/` | js | `node --test` |
+| `fixtures/bun-sample/` | js | `bun test` |
+| `fixtures/deno-sample/` | js | `deno test` |
 
 Each fixture is a minimal but buildable/testable project. Spawn auto-detects the toolchain, selects the image, and runs build+test inside the container. Requires images to be built first (`spawn build`).
 
