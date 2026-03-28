@@ -9,7 +9,7 @@ nav_order: 2
 
 - **macOS 26+** (Tahoe or later)
 - Apple's [`container`](https://github.com/apple/containerization) CLI: `brew install container`
-- **Swift 6.2+** (only for building from source)
+- **Swift 6.3+** (only for building from source; `make test` prefers Xcode when installed)
 
 ## Installing
 

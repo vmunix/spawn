@@ -66,9 +66,10 @@ RunCommand.run()
 
 ## Testing
 
-Tests use Apple's `swift-testing` framework (added as an explicit package dependency since Command Line Tools alone don't include the test runner).
+Tests use Swift 6.3's built-in `Testing` framework.
 
 - Tests use `@Test func` and `#expect()` — not XCTest
+- `make test` prefers `/Applications/Xcode.app/Contents/Developer` when available because the Command Line Tools copy of `swift test` may not resolve `Testing.framework` correctly
 - `Tests/TestHelpers.swift` provides `makeTempDir(files:)` for creating temporary directory fixtures with specified file contents
 - Temp directories are auto-cleaned on first `makeTempDir` call per test run
 - `TestHelpers.swift` imports Foundation; test files import `Testing` and `@testable import spawn`
