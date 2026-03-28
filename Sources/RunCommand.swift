@@ -4,7 +4,18 @@ import Foundation
 extension Spawn {
     struct Run: AsyncParsableCommand {
         static let configuration = CommandConfiguration(
-            abstract: "Run an AI coding agent in a sandboxed container."
+            abstract: "Run an AI coding agent in a sandboxed container.",
+            discussion: """
+                Examples:
+                  spawn .                         Run Claude Code in the current directory
+                  spawn . codex                   Run Codex instead
+                  spawn ~/code/project --shell    Open a shell in the workspace container
+                  spawn . --toolchain rust        Override auto-detection
+                  spawn . --yolo                  Disable safe-mode prompts
+
+                Safe mode is the default. It keeps local coding workflows smooth while
+                gating remote-write git and gh operations inside the container.
+                """
         )
 
         @Argument(
@@ -52,6 +63,56 @@ extension Spawn {
         @Flag(name: .long, help: "Skip permission gates (default: safe mode, prompts before git push).")
         var yolo: Bool = false
 
+        static func launchSummaryLines(
+            workspace: URL,
+            agent: String,
+            shell: Bool,
+            yolo: Bool,
+            toolchainWasOverridden: Bool,
+            detection: ToolchainDetector.Inspection,
+            resolvedToolchain: Toolchain,
+            image: String,
+            noGit: Bool,
+            extraMountCount: Int,
+            readOnlyMountCount: Int,
+            envCount: Int,
+            cpus: Int,
+            memory: String
+        ) -> [String] {
+            let toolchainDetail: String
+            if toolchainWasOverridden {
+                toolchainDetail = "\(resolvedToolchain.rawValue) (--toolchain override)"
+            } else {
+                toolchainDetail =
+                    switch detection.source {
+                    case .spawnToml:
+                        "\(resolvedToolchain.rawValue) (.spawn.toml)"
+                    case .devcontainer:
+                        "\(resolvedToolchain.rawValue) (.devcontainer/devcontainer.json)"
+                    case .dockerfile:
+                        "\(resolvedToolchain.rawValue) (workspace has Dockerfile/Containerfile)"
+                    case .cargo, .goMod, .cmake:
+                        "\(resolvedToolchain.rawValue) (auto-detected)"
+                    case .fallback:
+                        "\(resolvedToolchain.rawValue) (fallback)"
+                    }
+            }
+
+            return [
+                "Launch summary:",
+                "  workspace: \(workspace.path)",
+                "  agent: \(agent)",
+                shell ? "  session: shell (/bin/bash)" : "  session: agent entrypoint",
+                yolo ? "  mode: yolo" : "  mode: safe",
+                "  toolchain: \(toolchainDetail)",
+                "  image: \(image)",
+                noGit ? "  git/ssh: disabled" : "  git/ssh: mounted",
+                "  extra mounts: \(extraMountCount) read-write, \(readOnlyMountCount) read-only",
+                "  environment: \(envCount) variable\(envCount == 1 ? "" : "s")",
+                "  resources: \(cpus) CPU, \(memory) memory",
+            ]
+        }
+
         private static func validateDirectory(at path: String, label: String) throws {
             var isDir: ObjCBool = false
             guard FileManager.default.fileExists(atPath: path, isDirectory: &isDir) else {
@@ -84,23 +145,12 @@ extension Spawn {
             }
 
             // Resolve toolchain
+            let detection = ToolchainDetector.inspect(in: path)
             let resolvedToolchain: Toolchain
             if let override = toolchain {
                 resolvedToolchain = try Toolchain.parse(override)
             } else {
-                resolvedToolchain = ToolchainDetector.detect(in: path) ?? .base
-            }
-
-            // Tell the user what we detected
-            if toolchain == nil {
-                print("Detected toolchain: \(resolvedToolchain.rawValue)")
-            }
-
-            // Print permission mode
-            if yolo {
-                print("Yolo mode: all operations unrestricted")
-            } else {
-                print("Safe mode: remote git operations require approval (use --yolo to disable)")
+                resolvedToolchain = detection.toolchain ?? .base
             }
 
             // Seed Claude Code safe-mode permissions
@@ -172,6 +222,28 @@ extension Spawn {
 
             // Working directory — derived from the primary mount's guest path
             let workdir = resolvedMounts[0].guestPath
+
+            let summaryLines = Self.launchSummaryLines(
+                workspace: path,
+                agent: agent,
+                shell: shell,
+                yolo: yolo,
+                toolchainWasOverridden: toolchain != nil,
+                detection: detection,
+                resolvedToolchain: resolvedToolchain,
+                image: resolvedImage,
+                noGit: noGit,
+                extraMountCount: mount.count,
+                readOnlyMountCount: readOnlyMounts.count,
+                envCount: environment.count,
+                cpus: cpus,
+                memory: memory
+            )
+            for line in summaryLines {
+                print(line)
+            }
+            print("Launching...")
+            fflush(stdout)
 
             // Run
             let status = try ContainerRunner.run(

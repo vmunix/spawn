@@ -2,9 +2,24 @@ import Foundation
 
 /// Priority-ordered toolchain detection from project files and configuration.
 enum ToolchainDetector: Sendable {
-    /// Returns nil when a Dockerfile/Containerfile is found (caller should build it directly).
-    /// Returns a Toolchain when a spawn-* image variant should be used.
-    static func detect(in directory: URL) -> Toolchain? {
+    enum Source: Sendable, Equatable {
+        case spawnToml
+        case devcontainer
+        case dockerfile
+        case cargo
+        case goMod
+        case cmake
+        case fallback
+    }
+
+    struct Inspection: Sendable, Equatable {
+        let toolchain: Toolchain?
+        let source: Source
+    }
+
+    /// Returns the resolved toolchain plus the source that drove the decision.
+    /// `toolchain == nil` means a Dockerfile/Containerfile was found.
+    static func inspect(in directory: URL) -> Inspection {
         let fm = FileManager.default
 
         // Priority 1: .spawn.toml
@@ -12,7 +27,7 @@ enum ToolchainDetector: Sendable {
         if fm.fileExists(atPath: spawnToml.path),
             let toolchain = parseSpawnToml(at: spawnToml)
         {
-            return toolchain
+            return Inspection(toolchain: toolchain, source: .spawnToml)
         }
 
         // Priority 2: .devcontainer/devcontainer.json
@@ -23,27 +38,39 @@ enum ToolchainDetector: Sendable {
         if fm.fileExists(atPath: devcontainer.path),
             let toolchain = parseDevcontainer(at: devcontainer)
         {
-            return toolchain
+            return Inspection(toolchain: toolchain, source: .devcontainer)
         }
 
         // Priority 3: Dockerfile / Containerfile
         if fm.fileExists(atPath: directory.appendingPathComponent("Dockerfile").path) || fm.fileExists(atPath: directory.appendingPathComponent("Containerfile").path) {
-            return nil
+            return Inspection(toolchain: nil, source: .dockerfile)
         }
 
         // Priority 4: Auto-detect from repo files
         return autoDetect(in: directory)
     }
 
-    private static func autoDetect(in directory: URL) -> Toolchain {
+    /// Returns nil when a Dockerfile/Containerfile is found (caller should build it directly).
+    /// Returns a Toolchain when a spawn-* image variant should be used.
+    static func detect(in directory: URL) -> Toolchain? {
+        inspect(in: directory).toolchain
+    }
+
+    private static func autoDetect(in directory: URL) -> Inspection {
         let fm = FileManager.default
         let exists = { fm.fileExists(atPath: directory.appendingPathComponent($0).path) }
 
-        if exists("Cargo.toml") || exists("rust-toolchain.toml") { return .rust }
-        if exists("go.mod") || exists("go.sum") { return .go }
-        if exists("CMakeLists.txt") { return .cpp }
+        if exists("Cargo.toml") || exists("rust-toolchain.toml") {
+            return Inspection(toolchain: .rust, source: .cargo)
+        }
+        if exists("go.mod") || exists("go.sum") {
+            return Inspection(toolchain: .go, source: .goMod)
+        }
+        if exists("CMakeLists.txt") {
+            return Inspection(toolchain: .cpp, source: .cmake)
+        }
 
-        return .base
+        return Inspection(toolchain: .base, source: .fallback)
     }
 
     private static func parseSpawnToml(at url: URL) -> Toolchain? {

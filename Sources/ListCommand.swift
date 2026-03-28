@@ -4,7 +4,11 @@ import Foundation
 extension Spawn {
     struct List: ParsableCommand {
         static let configuration = CommandConfiguration(
-            abstract: "List running containers."
+            abstract: "List running containers.",
+            discussion: """
+                Example:
+                  spawn list
+                """
         )
 
         mutating func run() throws {

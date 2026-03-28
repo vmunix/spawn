@@ -16,6 +16,8 @@ nav_order: 3
 | `spawn list` | List running containers |
 | `spawn stop` | Stop a running container |
 | `spawn exec` | Execute a command in a running container |
+| `spawn shell` | Open a shell in a running container |
+| `spawn doctor` | Check local images, config, and workspace detection |
 
 `run` is the default subcommand, so `spawn .` is equivalent to `spawn run .`.
 
@@ -129,4 +131,6 @@ spawn image rm spawn-rust:latest spawn-go:latest  # Remove images
 spawn list              # List running containers
 spawn stop <id>         # Stop a running container
 spawn exec <id> -- ls   # Run a command in a running container
+spawn shell <id>        # Open /bin/bash in a running container
+spawn doctor            # Check local setup and workspace detection
 ```
