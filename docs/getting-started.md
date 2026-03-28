@@ -16,8 +16,7 @@ nav_order: 2
 ### Homebrew (recommended)
 
 ```bash
-brew tap vmunix/tap
-brew install spawn
+brew install vmunix/tap/spawn
 ```
 
 ### From source

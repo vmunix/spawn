@@ -31,8 +31,7 @@ spawn detects your project's language, picks the right container image, mounts y
 ### Homebrew (recommended)
 
 ```bash
-brew tap vmunix/tap
-brew install spawn
+brew install vmunix/tap/spawn
 ```
 
 ### From source
