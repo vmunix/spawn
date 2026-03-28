@@ -2,20 +2,22 @@ import ArgumentParser
 import Foundation
 
 extension Spawn {
-    struct Stop: ParsableCommand {
+    struct Shell: ParsableCommand {
         static let configuration = CommandConfiguration(
-            abstract: "Stop a running container.",
+            abstract: "Open a shell in a running container.",
             discussion: """
                 Example:
-                  spawn stop 3f2b8d4f
+                  spawn shell 3f2b8d4f
+
+                This is a shortcut for `spawn exec <id> -- /bin/bash`.
                 """
         )
 
-        @Argument(help: "Container ID to stop.")
+        @Argument(help: "Container ID.")
         var id: String
 
         mutating func run() throws {
-            let status = try ContainerRunner.runRaw(args: ["stop", id])
+            let status = try ContainerRunner.runRaw(args: ["exec", id, "/bin/bash"])
             if status != 0 {
                 throw ExitCode(status)
             }

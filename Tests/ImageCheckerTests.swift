@@ -49,6 +49,20 @@ import Testing
     #expect(exists == false)
 }
 
+@Test func listsAvailableSpawnImagesOnly() throws {
+    let dir = try makeTempDir(files: [
+        "state.json": """
+        {
+            "spawn-base:latest": {},
+            "spawn-rust:latest": {},
+            "ubuntu:24.04": {}
+        }
+        """
+    ])
+    let images = ImageChecker.availableSpawnImages(storeRoot: dir)
+    #expect(images == ["spawn-base:latest", "spawn-rust:latest"])
+}
+
 // MARK: - Staleness detection
 
 @Test func detectsStaleToolchainImage() throws {

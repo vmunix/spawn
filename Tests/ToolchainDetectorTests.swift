@@ -74,3 +74,20 @@ import Testing
     let result = ToolchainDetector.detect(in: dir)
     #expect(result == .rust)
 }
+
+@Test func inspectReportsSpawnTomlSource() throws {
+    let dir = try makeTempDir(files: [
+        ".spawn.toml": """
+        [toolchain]
+        base = "go"
+        """
+    ])
+    let result = ToolchainDetector.inspect(in: dir)
+    #expect(result == ToolchainDetector.Inspection(toolchain: .go, source: .spawnToml))
+}
+
+@Test func inspectReportsDockerfileSource() throws {
+    let dir = try makeTempDir(files: ["Containerfile": "FROM ubuntu:24.04"])
+    let result = ToolchainDetector.inspect(in: dir)
+    #expect(result == ToolchainDetector.Inspection(toolchain: nil, source: .dockerfile))
+}

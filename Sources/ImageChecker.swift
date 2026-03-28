@@ -54,6 +54,12 @@ enum ImageChecker: Sendable {
         return json[reference] != nil
     }
 
+    /// Returns the sorted list of locally available `spawn-*` images.
+    static func availableSpawnImages(storeRoot: URL? = nil) -> [String] {
+        guard let json = loadState(storeRoot: storeRoot) else { return [] }
+        return json.keys.filter { $0.hasPrefix("spawn-") }.sorted()
+    }
+
     /// The base image that all toolchain images derive from.
     private static let baseImage = "spawn-base:latest"
 

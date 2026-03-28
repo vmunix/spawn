@@ -5,12 +5,23 @@ extension Spawn {
     struct Image: ParsableCommand {
         static let configuration = CommandConfiguration(
             abstract: "Manage spawn images.",
+            discussion: """
+                Examples:
+                  spawn image list
+                  spawn image list --all
+                  spawn image rm spawn-rust:latest
+                """,
             subcommands: [List.self, Remove.self]
         )
 
         struct List: ParsableCommand {
             static let configuration = CommandConfiguration(
-                abstract: "List available spawn images."
+                abstract: "List available spawn images.",
+                discussion: """
+                    Examples:
+                      spawn image list
+                      spawn image list --all
+                    """
             )
 
             @Flag(name: .long, help: "Show all images, not just spawn-* ones.")
@@ -52,7 +63,14 @@ extension Spawn {
         struct Remove: ParsableCommand {
             static let configuration = CommandConfiguration(
                 commandName: "rm",
-                abstract: "Remove one or more spawn images."
+                abstract: "Remove one or more spawn images.",
+                discussion: """
+                    Example:
+                      spawn image rm spawn-go:latest spawn-rust:latest
+
+                    `spawn image rm` only removes `spawn-*` images and refuses to remove
+                    `spawn-base`, since other spawn images depend on it.
+                    """
             )
 
             @Argument(help: "Image names to remove (e.g. spawn-cpp:latest).")

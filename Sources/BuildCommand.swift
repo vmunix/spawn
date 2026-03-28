@@ -4,7 +4,15 @@ import Foundation
 extension Spawn {
     struct Build: ParsableCommand {
         static let configuration = CommandConfiguration(
-            abstract: "Build or pull base images."
+            abstract: "Build or pull base images.",
+            discussion: """
+                Examples:
+                  spawn build
+                  spawn build rust
+                  spawn build base --memory 16g
+
+                Omit the toolchain to build all images. `spawn-base` is always built first.
+                """
         )
 
         @Argument(help: "Toolchain to build: base, cpp, rust, go. Omit to build all.")
