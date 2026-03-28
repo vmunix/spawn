@@ -20,6 +20,33 @@ import Testing
     #expect(result == .cpp)
 }
 
+@Test func detectsJavaScriptFromPackageJSON() throws {
+    let dir = try makeTempDir(files: ["package.json": "{\"name\":\"app\"}"])
+    let result = ToolchainDetector.inspect(in: dir)
+    #expect(result == ToolchainDetector.Inspection(toolchain: .js, source: .packageJSON))
+}
+
+@Test func detectsJavaScriptFromBunLock() throws {
+    let dir = try makeTempDir(files: ["bun.lock": ""])
+    let result = ToolchainDetector.inspect(in: dir)
+    #expect(result == ToolchainDetector.Inspection(toolchain: .js, source: .bunLock))
+}
+
+@Test func detectsJavaScriptFromDenoConfig() throws {
+    let dir = try makeTempDir(files: ["deno.json": "{\"tasks\":{}}"])
+    let result = ToolchainDetector.inspect(in: dir)
+    #expect(result == ToolchainDetector.Inspection(toolchain: .js, source: .denoConfig))
+}
+
+@Test func prefersRustOverPackageJSONInMixedRepo() throws {
+    let dir = try makeTempDir(files: [
+        "Cargo.toml": "",
+        "package.json": "{\"name\":\"ui\"}",
+    ])
+    let result = ToolchainDetector.inspect(in: dir)
+    #expect(result == ToolchainDetector.Inspection(toolchain: .rust, source: .cargo))
+}
+
 @Test func makefileAloneFallsToBase() throws {
     let dir = try makeTempDir(files: ["Makefile": ""])
     let result = ToolchainDetector.detect(in: dir)

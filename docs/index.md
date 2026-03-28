@@ -45,7 +45,7 @@ export PATH="$HOME/.local/bin:$PATH"
 spawn build
 
 # Or build just what you need
-spawn build rust    # also: base, cpp, go
+spawn build rust    # also: base, cpp, go, js
 
 # Run Claude Code in your project
 spawn .
@@ -67,7 +67,7 @@ spawn doctor
 
 `spawn` wraps Apple's [`container`](https://github.com/apple/containerization) CLI to launch AI coding agents in lightweight Linux VMs.
 
-- **Auto-detects your project's toolchain** (C++, Rust, Go) and picks the right container image
+- **Auto-detects your project's toolchain** (C++, Rust, Go, JS/TS) and picks the right container image
 - **Safe mode by default** -- prompts before `git push`, PR creation, and other remote-write operations
 - **Mounts git config and SSH keys** so the agent can commit and push
 - **Persists OAuth credentials** across runs -- authenticate once, not every session

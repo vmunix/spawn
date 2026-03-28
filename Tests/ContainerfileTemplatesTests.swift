@@ -43,3 +43,21 @@ import Testing
     let content = ContainerfileTemplates.content(for: .go)
     #expect(!content.contains("ARG GO_VERSION"))
 }
+
+@Test func jsContainerfileExtendsBase() {
+    let content = ContainerfileTemplates.content(for: .js)
+    #expect(content.contains("FROM spawn-base:latest"))
+    #expect(content.contains("bun.sh/install"))
+    #expect(content.contains("deno.land/install.sh"))
+}
+
+@Test func jsContainerfileEnablesCorepack() {
+    let content = ContainerfileTemplates.content(for: .js)
+    #expect(content.contains("corepack enable"))
+}
+
+@Test func jsContainerfilePinsNodeLTS() {
+    let content = ContainerfileTemplates.content(for: .js)
+    #expect(content.contains("nodejs.org/download/release/v22.22.1"))
+    #expect(content.contains("linux-arm64") || content.contains("linux-x64"))
+}

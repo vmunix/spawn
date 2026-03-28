@@ -37,6 +37,28 @@ import Testing
     #expect(config?.toolchain == .go)
 }
 
+@Test func parsesNodeImageAsJavaScriptToolchain() throws {
+    let dir = try makeTempDir(files: [
+        "devcontainer.json": """
+        {"image": "mcr.microsoft.com/devcontainers/typescript-node:1-22-bookworm"}
+        """
+    ])
+    let config = DevcontainerConfig.parse(at: dir.appendingPathComponent("devcontainer.json"))
+    #expect(config != nil)
+    #expect(config?.toolchain == .js)
+}
+
+@Test func parsesDenoFeatureAsJavaScriptToolchain() throws {
+    let dir = try makeTempDir(files: [
+        "devcontainer.json": """
+        {"features": {"ghcr.io/devcontainers/features/deno:1": {}}}
+        """
+    ])
+    let config = DevcontainerConfig.parse(at: dir.appendingPathComponent("devcontainer.json"))
+    #expect(config != nil)
+    #expect(config?.toolchain == .js)
+}
+
 @Test func parsesContainerEnv() throws {
     let dir = try makeTempDir(files: [
         "devcontainer.json": """

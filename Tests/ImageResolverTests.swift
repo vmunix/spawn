@@ -22,6 +22,11 @@ import Testing
     #expect(image == "spawn-cpp:latest")
 }
 
+@Test func jsImage() throws {
+    let image = try ImageResolver.resolve(toolchain: .js, imageOverride: nil)
+    #expect(image == "spawn-js:latest")
+}
+
 @Test func rejectsInvalidImageReference() {
     let hex64 = String(repeating: "a", count: 64)
     #expect(throws: Error.self) {

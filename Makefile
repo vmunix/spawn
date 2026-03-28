@@ -44,6 +44,18 @@ smoke: build
 	echo 'set -e && rustc --version && cargo build 2>&1 && cargo test 2>&1 && echo "PASS: rust-sample"' | \
 		.build/release/$(BINARY) fixtures/rust-sample --shell
 	@echo ""
+	@echo "=== Node fixture: build + test ==="
+	echo 'set -e && node --version && npm --version && node --test && echo "PASS: node-sample"' | \
+		.build/release/$(BINARY) fixtures/node-sample --shell
+	@echo ""
+	@echo "=== Bun fixture: build + test ==="
+	echo 'set -e && bun --version && bun test && echo "PASS: bun-sample"' | \
+		.build/release/$(BINARY) fixtures/bun-sample --shell
+	@echo ""
+	@echo "=== Deno fixture: build + test ==="
+	echo 'set -e && deno --version && deno test && echo "PASS: deno-sample"' | \
+		.build/release/$(BINARY) fixtures/deno-sample --shell
+	@echo ""
 	@echo "=== All smoke tests passed ==="
 
 images:
@@ -51,3 +63,4 @@ images:
 	container build -t spawn-cpp:latest -f Images/cpp/Containerfile .
 	container build -t spawn-rust:latest -f Images/rust/Containerfile .
 	container build -t spawn-go:latest -f Images/go/Containerfile .
+	container build -t spawn-js:latest -f Images/js/Containerfile .

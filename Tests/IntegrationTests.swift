@@ -59,3 +59,26 @@ import Testing
     #expect(args.contains("codex"))
     #expect(args.contains { $0.contains("--cpus") })
 }
+
+@Test func fullPipelineWithJavaScriptProject() throws {
+    let target = try makeTempDir(files: ["bun.lock": ""])
+
+    let toolchain = ToolchainDetector.detect(in: target)
+    #expect(toolchain == .js)
+
+    let image = try ImageResolver.resolve(toolchain: toolchain ?? .base, imageOverride: nil)
+    #expect(image == "spawn-js:latest")
+
+    let args = ContainerRunner.buildArgs(
+        image: image,
+        mounts: [Mount(hostPath: target.path, readOnly: false)],
+        env: [:],
+        workdir: "/workspace/\(target.lastPathComponent)",
+        entrypoint: AgentProfile.claudeCode.safeEntrypoint,
+        cpus: 2,
+        memory: "4g"
+    )
+
+    #expect(args.contains("spawn-js:latest"))
+    #expect(args.contains("claude"))
+}

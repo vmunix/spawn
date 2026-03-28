@@ -9,7 +9,47 @@ enum ToolchainDetector: Sendable {
         case cargo
         case goMod
         case cmake
+        case bunLock
+        case denoConfig
+        case denoLock
+        case pnpmLock
+        case yarnLock
+        case packageLock
+        case packageJSON
         case fallback
+
+        var detail: String {
+            switch self {
+            case .spawnToml:
+                ".spawn.toml"
+            case .devcontainer:
+                ".devcontainer/devcontainer.json"
+            case .dockerfile:
+                "workspace has Dockerfile/Containerfile"
+            case .cargo:
+                "auto-detected from Cargo.toml/rust-toolchain.toml"
+            case .goMod:
+                "auto-detected from go.mod/go.sum"
+            case .cmake:
+                "auto-detected from CMakeLists.txt"
+            case .bunLock:
+                "auto-detected from bun.lock/bun.lockb"
+            case .denoConfig:
+                "auto-detected from deno.json/deno.jsonc"
+            case .denoLock:
+                "auto-detected from deno.lock"
+            case .pnpmLock:
+                "auto-detected from pnpm-lock.yaml"
+            case .yarnLock:
+                "auto-detected from yarn.lock"
+            case .packageLock:
+                "auto-detected from package-lock.json/npm-shrinkwrap.json"
+            case .packageJSON:
+                "auto-detected from package.json"
+            case .fallback:
+                "fallback"
+            }
+        }
     }
 
     struct Inspection: Sendable, Equatable {
@@ -68,6 +108,27 @@ enum ToolchainDetector: Sendable {
         }
         if exists("CMakeLists.txt") {
             return Inspection(toolchain: .cpp, source: .cmake)
+        }
+        if exists("bun.lock") || exists("bun.lockb") {
+            return Inspection(toolchain: .js, source: .bunLock)
+        }
+        if exists("deno.json") || exists("deno.jsonc") {
+            return Inspection(toolchain: .js, source: .denoConfig)
+        }
+        if exists("deno.lock") {
+            return Inspection(toolchain: .js, source: .denoLock)
+        }
+        if exists("pnpm-lock.yaml") {
+            return Inspection(toolchain: .js, source: .pnpmLock)
+        }
+        if exists("yarn.lock") {
+            return Inspection(toolchain: .js, source: .yarnLock)
+        }
+        if exists("package-lock.json") || exists("npm-shrinkwrap.json") {
+            return Inspection(toolchain: .js, source: .packageLock)
+        }
+        if exists("package.json") {
+            return Inspection(toolchain: .js, source: .packageJSON)
         }
 
         return Inspection(toolchain: .base, source: .fallback)

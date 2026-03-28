@@ -49,13 +49,13 @@ extension Spawn {
                 return Check(
                     status: .ok,
                     title: "Workspace",
-                    detail: "\(path.path) -> \(inspection.toolchain?.imageName ?? "spawn-base:latest") from .spawn.toml"
+                    detail: "\(path.path) -> \(inspection.toolchain?.imageName ?? "spawn-base:latest") from \(inspection.source.detail)"
                 )
             case .devcontainer:
                 return Check(
                     status: .ok,
                     title: "Workspace",
-                    detail: "\(path.path) -> \(inspection.toolchain?.imageName ?? "spawn-base:latest") from .devcontainer/devcontainer.json"
+                    detail: "\(path.path) -> \(inspection.toolchain?.imageName ?? "spawn-base:latest") from \(inspection.source.detail)"
                 )
             case .dockerfile:
                 return Check(
@@ -63,25 +63,12 @@ extension Spawn {
                     title: "Workspace",
                     detail: "\(path.path) has a Dockerfile/Containerfile; spawn run will fall back to spawn-base:latest unless you pass --toolchain or --image"
                 )
-            case .cargo, .goMod, .cmake, .fallback:
+            case .cargo, .goMod, .cmake, .bunLock, .denoConfig, .denoLock, .pnpmLock, .yarnLock, .packageLock, .packageJSON, .fallback:
                 let image = inspection.toolchain?.imageName ?? "spawn-base:latest"
-                let source: String =
-                    switch inspection.source {
-                    case .cargo:
-                        "auto-detected from Rust files"
-                    case .goMod:
-                        "auto-detected from Go files"
-                    case .cmake:
-                        "auto-detected from CMakeLists.txt"
-                    case .fallback:
-                        "fallback to base"
-                    default:
-                        ""
-                    }
                 return Check(
                     status: .ok,
                     title: "Workspace",
-                    detail: "\(path.path) -> \(image) (\(source))"
+                    detail: "\(path.path) -> \(image) (\(inspection.source.detail))"
                 )
             }
         }

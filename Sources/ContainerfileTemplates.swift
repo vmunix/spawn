@@ -4,6 +4,8 @@ import Foundation
 enum ContainerfileTemplates: Sendable {
     /// The Go release version used in the go Containerfile template.
     private static let goVersion = "1.24.0"
+    private static let nodeVersion = "22.22.1"
+    private static let bunVersion = "1.2.13"
 
     /// The host architecture mapped to Go's naming convention (`arm64` or `amd64`).
     private static let goArch: String = {
@@ -11,6 +13,15 @@ enum ContainerfileTemplates: Sendable {
         return "arm64"
         #else
         return "amd64"
+        #endif
+    }()
+
+    /// The host architecture mapped to Node.js release naming (`arm64` or `x64`).
+    private static let nodeArch: String = {
+        #if arch(arm64)
+        return "arm64"
+        #else
+        return "x64"
         #endif
     }()
 
@@ -110,6 +121,7 @@ enum ContainerfileTemplates: Sendable {
         case .cpp: return cpp
         case .rust: return rust
         case .go: return go
+        case .js: return js
         }
     }
 
@@ -216,5 +228,31 @@ enum ContainerfileTemplates: Sendable {
         RUN curl -fsSL "https://go.dev/dl/go\(goVersion).linux-\(goArch).tar.gz" | tar -C /usr/local -xz
         ENV PATH="/usr/local/go/bin:/home/coder/go/bin:${PATH}"
         USER coder
+        """
+
+    static let js = """
+        FROM spawn-base:latest
+
+        USER root
+
+        RUN apt-get update && apt-get install -y --no-install-recommends unzip \\
+            && rm -rf /var/lib/apt/lists/*
+
+        # Install a modern Node LTS release so npm/corepack are current.
+        RUN curl -fsSL "https://nodejs.org/download/release/v\(nodeVersion)/node-v\(nodeVersion)-linux-\(nodeArch).tar.gz" \\
+            | tar -C /usr/local --strip-components=1 -xz
+
+        # Corepack gives first-class pnpm/yarn support for Node projects.
+        RUN corepack enable
+
+        USER coder
+
+        # Bun
+        RUN curl -fsSL https://bun.sh/install | bash -s "bun-v\(bunVersion)"
+
+        # Deno
+        RUN curl -fsSL https://deno.land/install.sh | sh
+
+        ENV PATH="/home/coder/.bun/bin:/home/coder/.deno/bin:${PATH}"
         """
 }

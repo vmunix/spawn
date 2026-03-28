@@ -22,6 +22,7 @@ import Testing
     #expect(Toolchain(rawValue: "cpp") == .cpp)
     #expect(Toolchain(rawValue: "rust") == .rust)
     #expect(Toolchain(rawValue: "go") == .go)
+    #expect(Toolchain(rawValue: "js") == .js)
     #expect(Toolchain(rawValue: "base") == .base)
     #expect(Toolchain(rawValue: "invalid") == nil)
 }

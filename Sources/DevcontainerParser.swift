@@ -49,6 +49,7 @@ struct DevcontainerConfig: Sendable {
         if lower.contains("rust") { return .rust }
         if lower.contains("go") || lower.contains("golang") { return .go }
         if lower.contains("cpp") || lower.contains("c++") { return .cpp }
+        if lower.contains("node") || lower.contains("javascript") || lower.contains("typescript") || lower.contains("bun") || lower.contains("deno") { return .js }
         return .base
     }
 
@@ -58,6 +59,7 @@ struct DevcontainerConfig: Sendable {
             if lower.contains("rust") { return .rust }
             if lower.contains("go") || lower.contains("golang") { return .go }
             if lower.contains("cpp") || lower.contains("c++") { return .cpp }
+            if lower.contains("node") || lower.contains("javascript") || lower.contains("typescript") || lower.contains("bun") || lower.contains("deno") { return .js }
         }
         return .base
     }
