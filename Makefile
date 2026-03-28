@@ -1,5 +1,11 @@
 PREFIX ?= $(HOME)/.local
 BINARY = spawn
+XCODE_DEVELOPER_DIR := /Applications/Xcode.app/Contents/Developer
+
+ifneq ($(wildcard $(XCODE_DEVELOPER_DIR)),)
+DEVELOPER_DIR ?= $(XCODE_DEVELOPER_DIR)
+export DEVELOPER_DIR
+endif
 
 .PHONY: build install uninstall clean test lint format images smoke
 

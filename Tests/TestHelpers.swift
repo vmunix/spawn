@@ -6,10 +6,12 @@ func fileURL(_ path: String) -> URL {
 }
 
 nonisolated(unsafe) private var hasCleanedUp = false
+private let cleanupLock = NSLock()
 
 /// Helper: create a temp directory with specified files
 func makeTempDir(files: [String: String]) throws -> URL {
     // Clean up old test directories on first call per test run
+    cleanupLock.lock()
     if !hasCleanedUp {
         hasCleanedUp = true
         let tmpDir = URL(fileURLWithPath: NSTemporaryDirectory())
@@ -21,6 +23,7 @@ func makeTempDir(files: [String: String]) throws -> URL {
             }
         }
     }
+    cleanupLock.unlock()
 
     let base = URL(fileURLWithPath: NSTemporaryDirectory())
         .appendingPathComponent("spawn-test-\(UUID().uuidString)")

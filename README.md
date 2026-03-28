@@ -23,7 +23,7 @@ spawn detects your project's language, picks the right container image, mounts y
 
 - macOS 26+
 - Apple's [`container`](https://github.com/apple/containerization) CLI: `brew install container`
-- Swift 6.2+ (for building from source)
+- Swift 6.3+ (for building from source; `make test` prefers Xcode when installed)
 
 ## Install
 
@@ -156,7 +156,7 @@ For detailed guides on permissions, authentication, and architecture, see the [d
 
 ```bash
 make build              # Debug build
-make test               # Lint + tests
+make test               # Lint + tests (prefers Xcode's SwiftPM when available)
 make smoke              # End-to-end tests against real containers
 make install            # Install to ~/.local/bin
 ```

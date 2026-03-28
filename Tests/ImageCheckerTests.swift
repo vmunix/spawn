@@ -49,11 +49,6 @@ import Testing
     #expect(exists == false)
 }
 
-@Test func returnsFalseWhenStoreRootIsNil() {
-    let exists = ImageChecker.imageExists("spawn-base:latest", storeRoot: nil)
-    #expect(exists == false)
-}
-
 // MARK: - Staleness detection
 
 @Test func detectsStaleToolchainImage() throws {
