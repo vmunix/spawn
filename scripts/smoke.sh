@@ -80,22 +80,21 @@ expect_regex "${REPLY}" '"source"[[:space:]]*:[[:space:]]*"spawn-toml"' "rust do
 expect_regex "${REPLY}" '"agent"[[:space:]]*:[[:space:]]*"codex"' "rust doctor agent default"
 expect_regex "${REPLY}" '"access"[[:space:]]*:[[:space:]]*"minimal"' "rust doctor access default"
 
-section "Rust fixture: cwd default + passthrough command"
-(
-  cd "${ROOT}/fixtures/rust-sample"
-  "${SPAWN_BIN}" -- cargo test
-)
-printf '\n'
+run_and_capture "Rust fixture: cwd default + passthrough command" \
+  /bin/bash -lc "cd \"${ROOT}/fixtures/rust-sample\" && \"${SPAWN_BIN}\" -- cargo test"
+expect_contains "${REPLY}" "session: command (cargo test)" "rust passthrough launch summary"
 
-section "Go fixture: explicit workspace + access profile"
-"${SPAWN_BIN}" -C "${ROOT}/fixtures/go-sample" --access minimal -- /bin/bash -lc \
-  'go version && go build ./... && go test -v ./... && echo "PASS: go-sample"'
-printf '\n'
+run_and_capture "Go fixture: explicit workspace + access profile" \
+  "${SPAWN_BIN}" -C "${ROOT}/fixtures/go-sample" --access minimal -- /bin/bash -lc \
+  'test ! -e /home/coder/.ssh && test ! -e /home/coder/.config/gh/hosts.yml && go version && go build ./... && go test -v ./... && echo "PASS: go-sample"'
+expect_contains "${REPLY}" "access: minimal" "go access profile"
+expect_contains "${REPLY}" "PASS: go-sample" "go fixture output"
 
-section "C++ fixture: explicit runtime selection"
-"${SPAWN_BIN}" -C "${ROOT}/fixtures/cpp-sample" --runtime spawn -- /bin/bash -lc \
+run_and_capture "C++ fixture: explicit runtime selection" \
+  "${SPAWN_BIN}" -C "${ROOT}/fixtures/cpp-sample" --runtime spawn -- /bin/bash -lc \
   'clang --version | head -1 && mkdir -p build && cd build && cmake -G Ninja .. && ninja && ctest --output-on-failure && echo "PASS: cpp-sample"'
-printf '\n'
+expect_contains "${REPLY}" "runtime: spawn" "cpp runtime selection"
+expect_contains "${REPLY}" "PASS: cpp-sample" "cpp fixture output"
 
 section "Node fixture: explicit runtime selection"
 "${SPAWN_BIN}" -C "${ROOT}/fixtures/node-sample" --runtime spawn -- /bin/bash -lc \
@@ -111,10 +110,11 @@ printf '%s\n' \
   | "${SPAWN_BIN}" -C "${ROOT}/fixtures/bun-sample" --shell
 printf '\n'
 
-section "Deno fixture: toolchain override"
-"${SPAWN_BIN}" -C "${ROOT}/fixtures/deno-sample" --toolchain js -- /bin/bash -lc \
+run_and_capture "Deno fixture: toolchain override" \
+  "${SPAWN_BIN}" -C "${ROOT}/fixtures/deno-sample" --toolchain js -- /bin/bash -lc \
   'deno --version && deno test && echo "PASS: deno-sample"'
-printf '\n'
+expect_contains "${REPLY}" "toolchain: js (--toolchain override)" "deno toolchain override"
+expect_contains "${REPLY}" "PASS: deno-sample" "deno fixture output"
 
 run_and_capture "Workspace-image fixture: root Dockerfile build" \
   "${SPAWN_BIN}" -C "${ROOT}/fixtures/workspace-image-sample" --runtime workspace-image -- workspace-image-smoke

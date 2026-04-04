@@ -18,10 +18,12 @@ enum MountResolver: Sendable {
         additional: [String],
         readOnly: [String],
         access: AccessProfile,
-        agent: String
+        agent: String,
+        fileManager: FileManager = .default,
+        stateDir: URL = Paths.stateDir,
+        homeDirectory: URL = FileManager.default.homeDirectoryForCurrentUser
     ) -> [Mount] {
-        let fm = FileManager.default
-        let stateDir = Paths.stateDir
+        let fm = fileManager
         var mounts: [Mount] = []
 
         // Primary target
@@ -43,7 +45,7 @@ enum MountResolver: Sendable {
         // coder user (uid 1001). We copy to the XDG state dir where we control
         // permissions, and mount the copies. The Containerfile has symlinks from
         // the expected paths into these mount points.
-        let home = fm.homeDirectoryForCurrentUser
+        let home = homeDirectory
 
         if access.mountsGitConfig {
             let gitconfig = home.appendingPathComponent(".gitconfig")

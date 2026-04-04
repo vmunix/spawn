@@ -6,11 +6,14 @@ import Testing
     let help = Spawn.helpMessage(columns: 100)
 
     #expect(help.contains("Quick start:"))
+    #expect(help.contains("spawn codex"))
+    #expect(help.contains("spawn -C ~/code/project"))
     #expect(help.contains("spawn -- cargo test"))
     #expect(help.contains("Runtime selection:"))
     #expect(help.contains("--runtime workspace-image"))
     #expect(help.contains("Workspace defaults:"))
     #expect(help.contains(".spawn.toml [workspace]"))
+    #expect(help.contains("Bare invocations route to `spawn run`."))
     #expect(help.contains("spawn help run"))
 }
 

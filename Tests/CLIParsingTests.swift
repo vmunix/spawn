@@ -34,3 +34,34 @@ import Testing
     #expect(parsed.cwd == "/tmp/project")
     #expect(parsed.shell == true)
 }
+
+@Test func rootRoutingDefaultsToRunCommand() throws {
+    let command = try Spawn.parseAsRoot([])
+    #expect(command is Spawn.Run)
+}
+
+@Test func rootRoutingParsesBarePassthroughCommand() throws {
+    let command = try Spawn.parseAsRoot(Spawn.rewrittenArguments(["--", "cargo", "test"]))
+    guard var parsed = command as? Spawn.Run else {
+        Issue.record("Expected Spawn.Run from parseAsRoot")
+        return
+    }
+    parsed.command = Spawn.Run.normalizedCommand(parsed.command)
+
+    #expect(parsed.command == ["cargo", "test"])
+    #expect(parsed.agent == nil)
+    #expect(parsed.cwd == nil)
+}
+
+@Test func rootRoutingParsesAgentShortcutAndCwdPassthrough() throws {
+    let command = try Spawn.parseAsRoot(Spawn.rewrittenArguments(["codex", "-C", "/tmp/project", "--", "swift", "test"]))
+    guard var parsed = command as? Spawn.Run else {
+        Issue.record("Expected Spawn.Run from parseAsRoot")
+        return
+    }
+    parsed.command = Spawn.Run.normalizedCommand(parsed.command)
+
+    #expect(parsed.agent == "codex")
+    #expect(parsed.cwd == "/tmp/project")
+    #expect(parsed.command == ["swift", "test"])
+}

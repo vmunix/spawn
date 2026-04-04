@@ -1,3 +1,4 @@
+import Foundation
 import Testing
 
 @testable import spawn
@@ -81,4 +82,41 @@ import Testing
 
     #expect(args.contains("spawn-js:latest"))
     #expect(args.contains("claude"))
+}
+
+@Test func fullPipelineWithTrustedAccessIncludesCredentialVolumes() throws {
+    let target = try makeTempDir(files: ["Cargo.toml": ""])
+    let home = try makeTempDir(
+        files: [
+            ".gitconfig": "[user]\n\tname = Spawn Tester\n",
+            ".config/gh/hosts.yml": "github.com:\n    oauth_token: token\n",
+            ".config/gh/config.yml": "editor: vim\n",
+            ".ssh/id_ed25519": "PRIVATE KEY",
+        ]
+    )
+    let stateDir = try makeTempDir(files: [:])
+
+    let mounts = MountResolver.resolve(
+        target: target,
+        additional: [],
+        readOnly: [],
+        access: .trusted,
+        agent: "claude-code",
+        stateDir: stateDir,
+        homeDirectory: home
+    )
+    let args = ContainerRunner.buildArgs(
+        image: "spawn-rust:latest",
+        mounts: mounts,
+        env: [:],
+        workdir: "/workspace/\(target.lastPathComponent)",
+        entrypoint: AgentProfile.claudeCode.safeEntrypoint,
+        cpus: 4,
+        memory: "8g"
+    )
+
+    #expect(args.contains("--volume"))
+    #expect(args.contains("\(stateDir.appendingPathComponent("git").path):/home/coder/.gitconfig-dir:ro"))
+    #expect(args.contains("\(stateDir.appendingPathComponent("gh").path):/home/coder/.config/gh:ro"))
+    #expect(args.contains("\(stateDir.appendingPathComponent("ssh").path):/home/coder/.ssh:ro"))
 }
