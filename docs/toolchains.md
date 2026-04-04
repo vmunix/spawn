@@ -13,9 +13,9 @@ Detection runs in priority order. The first match wins:
 
 | Priority | Source | Toolchain |
 |----------|--------|-----------|
-| 1 | `.spawn.toml` | Explicit config (`[toolchain] base = "..."`) |
+| 1 | `.spawn.toml` | Explicit config (`[workspace]`, `[toolchain]`) |
 | 2 | `.devcontainer/devcontainer.json` | Parsed from image or features |
-| 3 | `Dockerfile` / `Containerfile` | Returns nil (build directly) |
+| 3 | `.devcontainer/devcontainer.json` with `build.dockerfile` or root `Dockerfile` / `Containerfile` | Requires explicit runtime selection |
 | 4 | Project files | See file detection table below |
 | 5 | *(fallback)* | `base` (Ubuntu 24.04 + Node.js) |
 
@@ -54,7 +54,7 @@ All toolchain images extend `spawn-base:latest`, so they include everything in t
 ### CLI flag
 
 ```bash
-spawn . --toolchain rust
+spawn --toolchain rust
 ```
 
 ### .spawn.toml
@@ -62,22 +62,46 @@ spawn . --toolchain rust
 Create a `.spawn.toml` file in your project root:
 
 ```toml
+[workspace]
+agent = "codex"
+access = "git"
+
 [toolchain]
 base = "rust"
 ```
 
-Valid values: `base`, `cpp`, `rust`, `go`, `js`.
+Valid values:
+
+- `workspace.agent`: `claude-code`, `codex`
+- `workspace.access`: `minimal`, `git`, `trusted`
+- `toolchain.base`: `base`, `cpp`, `rust`, `go`, `js`
+
+CLI flags override `.spawn.toml` when both are present.
 
 ### Custom image
 
 To use an entirely different image, bypassing toolchain detection:
 
 ```bash
-spawn . --image my-custom-image:latest
+spawn --image my-custom-image:latest
 ```
+
+### Workspace-defined runtimes
+
+If a workspace defines its own runtime with a root `Dockerfile` / `Containerfile`, or with `.devcontainer/devcontainer.json` and `build.dockerfile`, spawn does not yet build and run that workspace image automatically.
+
+For now, opt into spawn-managed images explicitly:
+
+```bash
+spawn --runtime spawn
+```
+
+`--runtime workspace-image` is reserved for future support.
 
 ## Devcontainer support
 
 spawn reads `.devcontainer/devcontainer.json` and maps the image or features to a toolchain. This lets projects that already use devcontainers work with spawn without additional configuration.
 
 If a viable `.devcontainer/devcontainer.json` is present, spawn prefers it over file-based heuristics. The launch summary and `spawn doctor` output tell you when that config drove the selection.
+
+When a devcontainer uses `build.dockerfile`, spawn treats that as a workspace-defined runtime and requires `--runtime spawn` today.

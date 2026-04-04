@@ -1,7 +1,98 @@
+import ArgumentParser
 import Foundation
 import Testing
 
 @testable import spawn
+
+@Test func resolveLaunchRequestDefaultsToCurrentDirectoryAndClaudeCode() throws {
+    let workspace = try makeTempDir(files: [:])
+
+    let launchRequest = try Spawn.Run.resolveLaunchRequest(
+        agent: "claude-code",
+        cwdOverride: nil,
+        currentDirectory: workspace
+    )
+
+    #expect(launchRequest.workspace.path == workspace.standardizedFileURL.path)
+    #expect(launchRequest.agent == "claude-code")
+    #expect(launchRequest.workspaceConfig == nil)
+}
+
+@Test func resolveLaunchRequestTreatsKnownAgentAsAgentFromCurrentDirectory() throws {
+    let workspace = try makeTempDir(files: [:])
+
+    let launchRequest = try Spawn.Run.resolveLaunchRequest(
+        agent: "codex",
+        cwdOverride: nil,
+        currentDirectory: workspace
+    )
+
+    #expect(launchRequest.workspace.path == workspace.standardizedFileURL.path)
+    #expect(launchRequest.agent == "codex")
+}
+
+@Test func resolveLaunchRequestUsesWorkspaceConfigAgentByDefault() throws {
+    let workspace = try makeTempDir(files: [
+        ".spawn.toml": """
+        [workspace]
+        agent = "codex"
+        access = "git"
+        """
+    ])
+
+    let launchRequest = try Spawn.Run.resolveLaunchRequest(
+        agent: nil,
+        cwdOverride: nil,
+        currentDirectory: workspace
+    )
+
+    #expect(launchRequest.workspace.path == workspace.standardizedFileURL.path)
+    #expect(launchRequest.agent == "codex")
+    #expect(launchRequest.workspaceConfig?.accessName == "git")
+}
+
+@Test func resolveLaunchRequestUsesCwdOverrideForWorkspaceSelection() throws {
+    let workspace = try makeTempDir(files: [:])
+
+    let launchRequest = try Spawn.Run.resolveLaunchRequest(
+        agent: "claude-code",
+        cwdOverride: workspace.path,
+        currentDirectory: fileURL("/tmp/ignored")
+    )
+
+    #expect(launchRequest.workspace.path == workspace.standardizedFileURL.path)
+    #expect(launchRequest.agent == "claude-code")
+}
+
+@Test func resolveLaunchRequestRejectsUnknownAgent() throws {
+    let workspace = try makeTempDir(files: [:])
+
+    #expect(throws: ValidationError.self) {
+        _ = try Spawn.Run.resolveLaunchRequest(
+            agent: "not-an-agent",
+            cwdOverride: nil,
+            currentDirectory: workspace
+        )
+    }
+}
+
+@Test func resolveLaunchRequestGuidesWorkspacePathUsersToCwdFlag() throws {
+    let workspace = try makeTempDir(files: [:])
+
+    #expect(throws: ValidationError.self) {
+        _ = try Spawn.Run.resolveLaunchRequest(
+            agent: workspace.path,
+            cwdOverride: nil,
+            currentDirectory: fileURL("/tmp/ignored")
+        )
+    }
+}
+
+@Test func dockerfileSourcesRequireExplicitRuntimeSelection() {
+    #expect(Spawn.Run.requiresExplicitRuntimeSelection(for: .dockerfile) == true)
+    #expect(Spawn.Run.requiresExplicitRuntimeSelection(for: .devcontainerDockerfile) == true)
+    #expect(Spawn.Run.requiresExplicitRuntimeSelection(for: .cargo) == false)
+}
 
 @Test func launchSummaryIncludesCoreContext() {
     let workspace = URL(fileURLWithPath: "/Users/me/code/project")
@@ -9,12 +100,14 @@ import Testing
         workspace: workspace,
         agent: "codex",
         shell: false,
+        command: [],
         yolo: false,
+        runtimeMode: .spawn,
         toolchainWasOverridden: false,
         detection: ToolchainDetector.Inspection(toolchain: .rust, source: .cargo),
         resolvedToolchain: .rust,
         image: "spawn-rust:latest",
-        noGit: false,
+        accessProfile: .git,
         extraMountCount: 2,
         readOnlyMountCount: 1,
         envCount: 3,
@@ -25,6 +118,8 @@ import Testing
     #expect(lines.contains("  workspace: /Users/me/code/project"))
     #expect(lines.contains("  agent: codex"))
     #expect(lines.contains("  mode: safe"))
+    #expect(lines.contains("  runtime: spawn"))
+    #expect(lines.contains("  access: git"))
     #expect(lines.contains("  toolchain: rust (auto-detected from Cargo.toml/rust-toolchain.toml)"))
     #expect(lines.contains("  image: spawn-rust:latest"))
     #expect(lines.contains("  extra mounts: 2 read-write, 1 read-only"))
@@ -38,12 +133,14 @@ import Testing
         workspace: workspace,
         agent: "claude-code",
         shell: true,
+        command: [],
         yolo: true,
+        runtimeMode: .spawn,
         toolchainWasOverridden: false,
         detection: ToolchainDetector.Inspection(toolchain: .base, source: .fallback),
         resolvedToolchain: .base,
         image: "spawn-base:latest",
-        noGit: true,
+        accessProfile: .minimal,
         extraMountCount: 0,
         readOnlyMountCount: 0,
         envCount: 1,
@@ -53,8 +150,32 @@ import Testing
 
     #expect(lines.contains("  session: shell (/bin/bash)"))
     #expect(lines.contains("  mode: yolo"))
-    #expect(lines.contains("  git/ssh: disabled"))
+    #expect(lines.contains("  access: minimal"))
     #expect(lines.contains("  environment: 1 variable"))
+}
+
+@Test func launchSummaryMarksPassthroughCommands() {
+    let workspace = URL(fileURLWithPath: "/Users/me/code/project")
+    let lines = Spawn.Run.launchSummaryLines(
+        workspace: workspace,
+        agent: "claude-code",
+        shell: false,
+        command: ["cargo", "test"],
+        yolo: false,
+        runtimeMode: .spawn,
+        toolchainWasOverridden: false,
+        detection: ToolchainDetector.Inspection(toolchain: .rust, source: .cargo),
+        resolvedToolchain: .rust,
+        image: "spawn-rust:latest",
+        accessProfile: .minimal,
+        extraMountCount: 0,
+        readOnlyMountCount: 0,
+        envCount: 0,
+        cpus: 4,
+        memory: "8g"
+    )
+
+    #expect(lines.contains("  session: command (cargo test)"))
 }
 
 @Test func launchSummaryIncludesSpecificJavaScriptDetectionReason() {
@@ -63,12 +184,14 @@ import Testing
         workspace: workspace,
         agent: "claude-code",
         shell: false,
+        command: [],
         yolo: false,
+        runtimeMode: .spawn,
         toolchainWasOverridden: false,
         detection: ToolchainDetector.Inspection(toolchain: .js, source: .bunLock),
         resolvedToolchain: .js,
         image: "spawn-js:latest",
-        noGit: false,
+        accessProfile: .minimal,
         extraMountCount: 0,
         readOnlyMountCount: 0,
         envCount: 0,
@@ -85,12 +208,14 @@ import Testing
         workspace: workspace,
         agent: "claude-code",
         shell: false,
+        command: [],
         yolo: false,
+        runtimeMode: .spawn,
         toolchainWasOverridden: true,
         detection: ToolchainDetector.Inspection(toolchain: .go, source: .fallback),
         resolvedToolchain: .go,
         image: "spawn-go:latest",
-        noGit: false,
+        accessProfile: .trusted,
         extraMountCount: 0,
         readOnlyMountCount: 0,
         envCount: 0,

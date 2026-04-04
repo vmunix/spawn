@@ -15,7 +15,7 @@ import Testing
 
     // Resolve mounts
     let mounts = MountResolver.resolve(
-        target: target, additional: [], readOnly: [], includeGit: false, agent: "claude-code"
+        target: target, additional: [], readOnly: [], access: .minimal, agent: "claude-code"
     )
     #expect(mounts[0].guestPath.hasPrefix("/workspace/"))
 

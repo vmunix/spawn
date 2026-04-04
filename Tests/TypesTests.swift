@@ -27,6 +27,34 @@ import Testing
     #expect(Toolchain(rawValue: "invalid") == nil)
 }
 
+@Test func accessProfileFromString() {
+    #expect(AccessProfile(rawValue: "minimal") == .minimal)
+    #expect(AccessProfile(rawValue: "git") == .git)
+    #expect(AccessProfile(rawValue: "trusted") == .trusted)
+    #expect(AccessProfile(rawValue: "invalid") == nil)
+}
+
+@Test func runtimeModeFromString() {
+    #expect(RuntimeMode(rawValue: "auto") == .auto)
+    #expect(RuntimeMode(rawValue: "spawn") == .spawn)
+    #expect(RuntimeMode(rawValue: "workspace-image") == .workspaceImage)
+    #expect(RuntimeMode(rawValue: "invalid") == nil)
+}
+
+@Test func accessProfileCapabilities() {
+    #expect(AccessProfile.minimal.mountsGitConfig == false)
+    #expect(AccessProfile.minimal.mountsGitHubCLIConfig == false)
+    #expect(AccessProfile.minimal.mountsSSHKeys == false)
+
+    #expect(AccessProfile.git.mountsGitConfig == true)
+    #expect(AccessProfile.git.mountsGitHubCLIConfig == true)
+    #expect(AccessProfile.git.mountsSSHKeys == false)
+
+    #expect(AccessProfile.trusted.mountsGitConfig == true)
+    #expect(AccessProfile.trusted.mountsGitHubCLIConfig == true)
+    #expect(AccessProfile.trusted.mountsSSHKeys == true)
+}
+
 @Test func builtInAgentProfiles() {
     let claude = AgentProfile.claudeCode
     #expect(claude.name == "claude-code")

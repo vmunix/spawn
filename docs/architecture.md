@@ -13,9 +13,9 @@ spawn follows the [XDG Base Directory Specification](https://specifications.free
 |------|---------|
 | `~/.config/spawn/env` | Default environment variables |
 | `~/.local/state/spawn/<agent>/` | Agent credentials and session state |
-| `~/.local/state/spawn/git/` | Copied git config for container mounts |
-| `~/.local/state/spawn/ssh/` | Copied SSH keys for container mounts |
-| `~/.local/state/spawn/gh/` | Copied gh CLI config for container mounts |
+| `~/.local/state/spawn/git/` | Copied git config for `git`/`trusted` access profiles |
+| `~/.local/state/spawn/ssh/` | Copied SSH keys for the `trusted` access profile |
+| `~/.local/state/spawn/gh/` | Copied gh CLI config for `git`/`trusted` access profiles |
 
 These paths respect `XDG_CONFIG_HOME` and `XDG_STATE_HOME` environment variables. For example, if `XDG_STATE_HOME` is set to `/custom/state`, spawn stores state at `/custom/state/spawn/` instead of `~/.local/state/spawn/`.
 
@@ -68,13 +68,16 @@ Containerfile content is embedded in the `spawn` binary as string literals, so `
 
 ## Run pipeline
 
-When you run `spawn .`, the following modules execute in sequence:
+When you run `spawn`, the following modules execute in sequence:
 
 ```
 RunCommand.run()
-  → AgentProfile.named()          # Validate agent (claude-code/codex)
+  → ToolchainDetector.loadWorkspaceConfig()
+                                  # Load `.spawn.toml` workspace defaults
+  → AgentProfile.named()          # Validate resolved agent (CLI/config/default)
   → SettingsSeeder.seed()         # Seed safe-mode permissions (claude-code only)
   → ToolchainDetector.detect()    # Auto-detect or use override
+  → RuntimeMode.parse()           # Decide whether auto/spawn/workspace-image applies
   → ImageResolver.resolve()       # Map toolchain to image name
   → MountResolver.resolve()       # Build mount list
   → EnvLoader.load/loadDefault()  # Load env vars
@@ -93,7 +96,7 @@ When stdin is a real terminal, spawn uses `execv` to replace its process with `c
 
 ### VirtioFS workaround
 
-VirtioFS preserves host file ownership and permissions. Files owned by the macOS user (uid 501) with 600 permissions are unreadable by the container's `coder` user (uid 1001). spawn copies git config and SSH keys to the state directory where it controls permissions, then mounts the copies.
+VirtioFS preserves host file ownership and permissions. Files owned by the macOS user (uid 501) with 600 permissions are unreadable by the container's `coder` user (uid 1001). When an access profile opts into host auth, spawn copies the selected files to the state directory where it controls permissions, then mounts the copies.
 
 Single-file bind mounts also don't support atomic rename (EBUSY). `~/.claude.json` is handled via a symlink into a directory mount (`~/.claude-state/`) to work around this.
 
@@ -101,6 +104,14 @@ Single-file bind mounts also don't support atomic rename (EBUSY). `~/.claude.jso
 
 Agent credentials are stored on the host at `~/.local/state/spawn/<agent>/` and mounted into containers. This means users authenticate once and credentials survive container restarts. No API keys are required for Claude Pro/Max plan users who authenticate via OAuth.
 
+### Access profiles
+
+Host auth exposure is controlled by `AccessProfile`:
+
+- `minimal` mounts no host git, `gh`, or SSH material
+- `git` mounts copied git config and `gh` CLI auth
+- `trusted` mounts copied git config, `gh` CLI auth, and SSH material
+
 ### SSH key handling
 
-SSH keys are copied (not mounted directly) to the state directory. Symlinks are filtered out to prevent exfiltrating files outside `~/.ssh/`. Private keys get `0600` permissions on the copies.
+When the `trusted` access profile is selected, SSH keys are copied (not mounted directly) to the state directory. Symlinks are filtered out to prevent exfiltrating files outside `~/.ssh/`. Private keys get `0600` permissions on the copies.

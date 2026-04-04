@@ -8,8 +8,11 @@ struct Spawn: AsyncParsableCommand {
         discussion: """
             Quick start:
               spawn build              Build container images (required once)
-              spawn .                  Run Claude Code in the current directory
-              spawn . codex            Run Codex instead
+              spawn                    Run Claude Code in the current directory
+              spawn codex              Run Codex instead
+              spawn -- cargo test      Run a command in the workspace container
+              spawn --shell            Open a shell in the workspace container
+              spawn -C ~/code/project  Run in another workspace
               spawn doctor             Check images, config, and workspace detection
 
             Common workflows:
@@ -19,7 +22,7 @@ struct Spawn: AsyncParsableCommand {
 
             Common run options:
               --yolo                   Skip permission gates (default: safe mode)
-              --no-git                 Don't mount git/SSH config into container
+              --access <name>          Host access profile (minimal/git/trusted)
               --shell                  Drop into a shell instead of running an agent
               --toolchain <name>       Override auto-detected toolchain (base/cpp/rust/go/js)
             """,

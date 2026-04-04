@@ -4,7 +4,8 @@ Sandboxed AI coding agents on macOS. Run Claude Code or Codex in filesystem-isol
 
 ```bash
 spawn build       # build container images (once)
-spawn .           # run Claude Code in current directory
+spawn             # run Claude Code in current directory
+spawn -- cargo test
 spawn doctor      # check local images, config, and workspace detection
 ```
 
@@ -16,7 +17,7 @@ spawn detects your project's language, picks the right container image, mounts y
 
 - **Auto-detects toolchains** — Rust, Go, C++, and JS/TS projects (Node, Bun, Deno), or falls back to a base image
 - **Safe mode by default** — prompts before `git push`, PR creation, and other remote-write operations
-- **Mounts git config and SSH keys** so the agent can commit and push
+- **Uses explicit access profiles** — default `minimal`, with opt-in `git` and `trusted` host auth exposure
 - **Persists OAuth credentials** across runs — authenticate once, not every session
 - **No API keys required** — Pro/Max plan users authenticate via OAuth
 
@@ -31,6 +32,7 @@ spawn detects your project's language, picks the right container image, mounts y
 ### Homebrew (recommended)
 
 ```bash
+brew install containers
 brew install vmunix/tap/spawn
 ```
 
@@ -58,13 +60,22 @@ spawn build
 spawn build rust    # also: base, cpp, go, js
 
 # Run Claude Code in your project
-spawn .
+spawn
 
 # Run Codex instead
-spawn . codex
+spawn codex
+
+# Run an arbitrary command
+spawn -- cargo test
+
+# Run in another workspace
+spawn -C ~/code/project
+
+# Opt into git identity and gh auth without exposing SSH keys
+spawn --access git
 
 # Drop into a shell for debugging
-spawn . --shell
+spawn --shell
 
 # Check your local setup and current workspace
 spawn doctor
@@ -75,14 +86,17 @@ spawn doctor
 ### Running agents
 
 ```bash
-spawn <path> [agent] [options]
+spawn [agent] [options]
+spawn -- <command...>
 ```
 
 | Option | Description |
 |--------|-------------|
 | `--yolo` | Skip permission gates (default: safe mode, prompts before git push) |
 | `--shell` | Drop into a shell instead of running an agent |
-| `--no-git` | Don't mount git/SSH config into the container |
+| `-C, --cwd <dir>` | Directory to mount as workspace (default: current directory) |
+| `--runtime <name>` | Runtime mode: `auto`, `spawn`, `workspace-image` |
+| `--access <name>` | Host access profile: `minimal`, `git`, `trusted` |
 | `--toolchain <name>` | Override auto-detected toolchain: `base`, `cpp`, `rust`, `go`, `js` |
 | `--image <name>` | Override auto-selected container image |
 | `--mount <dir>` | Mount an additional directory (repeatable) |
@@ -92,6 +106,31 @@ spawn <path> [agent] [options]
 | `--env <KEY=VALUE>` | Set environment variable (repeatable) |
 | `--env-file <path>` | Load environment variables from a file |
 | `--verbose` | Show the container command being run |
+
+Run an arbitrary command in the workspace container by passing it after `--`:
+
+```bash
+spawn -- cargo test
+spawn -C ~/code/project -- swift test
+```
+
+Access profiles control host auth exposure:
+
+- `minimal` mounts only the workspace, requested extra mounts, and persisted agent state
+- `git` additionally mounts git config and `gh` CLI auth
+- `trusted` additionally mounts copied SSH material
+
+Runtime mode controls how spawn reacts when a workspace defines its own runtime:
+
+- `auto` is the default
+- `spawn` opts into spawn-managed images explicitly
+- `workspace-image` is reserved for future support
+
+If your repo has a root `Dockerfile` / `Containerfile`, or a `.devcontainer/devcontainer.json` with `build.dockerfile`, spawn currently requires an explicit choice:
+
+```bash
+spawn --runtime spawn
+```
 
 ### Building images
 
@@ -144,14 +183,24 @@ Place a `KEY=VALUE` file at `~/.config/spawn/env` to set environment variables f
 
 ### Project-level config
 
-Add a `.spawn.toml` to your repo root to pin a toolchain:
+Add a `.spawn.toml` to your repo root to set workspace defaults:
 
 ```toml
+[workspace]
+agent = "codex"
+access = "git"
+
 [toolchain]
 base = "rust"
 ```
 
-Valid values: `base`, `cpp`, `rust`, `go`, `js`.
+Valid values:
+
+- `workspace.agent`: `claude-code`, `codex`
+- `workspace.access`: `minimal`, `git`, `trusted`
+- `toolchain.base`: `base`, `cpp`, `rust`, `go`, `js`
+
+CLI flags still win over `.spawn.toml`.
 
 spawn also reads `.devcontainer/devcontainer.json` to infer toolchains from images and features. If a viable devcontainer config is present, spawn prefers that explicit signal over repo-file heuristics. This makes existing VS Code devcontainer projects work with zero extra setup.
 
@@ -162,6 +211,8 @@ If your project already uses `.devcontainer/devcontainer.json`, spawn treats tha
 - devcontainer image/features are mapped to spawn toolchains
 - the launch summary and `spawn doctor` show when `.devcontainer/devcontainer.json` drove the choice
 - this makes spawn a good fit for projects already set up for VS Code Dev Containers
+
+If `.devcontainer/devcontainer.json` uses `build.dockerfile`, spawn does not yet build and run that workspace image automatically. For now, use `--runtime spawn` to opt into spawn-managed images explicitly.
 
 For JS/TS repos, `spawn-js:latest` bundles Node.js 22 LTS, Corepack, Bun, and Deno so the common runtime and package-manager paths work out of the box.
 

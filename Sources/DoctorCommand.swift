@@ -41,34 +41,76 @@ extension Spawn {
         )
         var path: URL = URL(fileURLWithPath: FileManager.default.currentDirectoryPath).standardizedFileURL
 
+        static func workspaceDetail(
+            path: URL,
+            inspection: ToolchainDetector.Inspection,
+            workspaceConfig: WorkspaceConfig?
+        ) -> String {
+            let image = inspection.toolchain?.imageName ?? "spawn-base:latest"
+            var detail: String
+
+            switch inspection.source {
+            case .spawnToml, .devcontainer:
+                detail = "\(path.path) -> \(image) from \(inspection.source.detail)"
+            case .devcontainerDockerfile:
+                detail =
+                    "\(path.path) uses .devcontainer/devcontainer.json with build.dockerfile; pass '--runtime spawn' to use spawn-managed images for now. '--runtime workspace-image' is reserved for future support."
+            case .dockerfile:
+                detail =
+                    "\(path.path) has a Dockerfile/Containerfile; pass '--runtime spawn' to use spawn-managed images for now. '--runtime workspace-image' is reserved for future support."
+            case .cargo, .goMod, .cmake, .bunLock, .denoConfig, .denoLock, .pnpmLock, .yarnLock, .packageLock, .packageJSON, .fallback:
+                detail = "\(path.path) -> \(image) (\(inspection.source.detail))"
+            }
+
+            var defaults: [String] = []
+            if let agentName = workspaceConfig?.agentName {
+                defaults.append("agent=\(agentName)")
+            }
+            if let accessName = workspaceConfig?.accessName {
+                defaults.append("access=\(accessName)")
+            }
+
+            if !defaults.isEmpty {
+                detail += " [workspace defaults: \(defaults.joined(separator: ", "))]"
+            }
+
+            return detail
+        }
+
         private static func workspaceCheck(at path: URL) -> Check {
             let inspection = ToolchainDetector.inspect(in: path)
+            let workspaceConfig = ToolchainDetector.loadWorkspaceConfig(in: path)
 
             switch inspection.source {
             case .spawnToml:
                 return Check(
                     status: .ok,
                     title: "Workspace",
-                    detail: "\(path.path) -> \(inspection.toolchain?.imageName ?? "spawn-base:latest") from \(inspection.source.detail)"
+                    detail: workspaceDetail(path: path, inspection: inspection, workspaceConfig: workspaceConfig)
                 )
             case .devcontainer:
                 return Check(
                     status: .ok,
                     title: "Workspace",
-                    detail: "\(path.path) -> \(inspection.toolchain?.imageName ?? "spawn-base:latest") from \(inspection.source.detail)"
+                    detail: workspaceDetail(path: path, inspection: inspection, workspaceConfig: workspaceConfig)
+                )
+            case .devcontainerDockerfile:
+                return Check(
+                    status: .warning,
+                    title: "Workspace",
+                    detail: workspaceDetail(path: path, inspection: inspection, workspaceConfig: workspaceConfig)
                 )
             case .dockerfile:
                 return Check(
                     status: .warning,
                     title: "Workspace",
-                    detail: "\(path.path) has a Dockerfile/Containerfile; spawn run will fall back to spawn-base:latest unless you pass --toolchain or --image"
+                    detail: workspaceDetail(path: path, inspection: inspection, workspaceConfig: workspaceConfig)
                 )
             case .cargo, .goMod, .cmake, .bunLock, .denoConfig, .denoLock, .pnpmLock, .yarnLock, .packageLock, .packageJSON, .fallback:
-                let image = inspection.toolchain?.imageName ?? "spawn-base:latest"
                 return Check(
                     status: .ok,
                     title: "Workspace",
-                    detail: "\(path.path) -> \(image) (\(inspection.source.detail))"
+                    detail: workspaceDetail(path: path, inspection: inspection, workspaceConfig: workspaceConfig)
                 )
             }
         }

@@ -63,7 +63,7 @@ Navigate to a project directory and run spawn:
 
 ```bash
 cd ~/code/my-project
-spawn .
+spawn
 ```
 
 spawn will:
@@ -71,7 +71,7 @@ spawn will:
 1. Detect your project's toolchain from files like `Cargo.toml`, `go.mod`, `CMakeLists.txt`, `package.json`, `bun.lock`, or `deno.json`
 2. Select the matching container image (e.g., `spawn-rust:latest`)
 3. Mount your project directory read/write into the container
-4. Copy your git config and SSH keys into the container
+4. Use the default `minimal` access profile unless you opt into host auth
 5. Launch Claude Code in safe mode
 
 On first run, Claude Code will prompt you to authenticate via OAuth. Your credentials are persisted in `~/.local/state/spawn/claude-code/` so you only need to authenticate once.
@@ -79,19 +79,31 @@ On first run, Claude Code will prompt you to authenticate via OAuth. Your creden
 To use Codex instead:
 
 ```bash
-spawn . codex
+spawn codex
 ```
 
 To skip all permission prompts:
 
 ```bash
-spawn . --yolo
+spawn --yolo
 ```
 
 To drop into a bash shell inside the container (useful for debugging):
 
 ```bash
-spawn . --shell
+spawn --shell
+```
+
+To reuse host git identity and `gh` auth without exposing SSH keys:
+
+```bash
+spawn --access git
+```
+
+If the repo defines its own runtime with a root `Dockerfile` / `Containerfile`, or a devcontainer `build.dockerfile`, spawn currently requires an explicit runtime choice:
+
+```bash
+spawn --runtime spawn
 ```
 
 If your project already has a `.devcontainer/devcontainer.json`, spawn uses that as an explicit signal before falling back to file-based heuristics. This makes existing VS Code devcontainer projects work nicely with spawn.

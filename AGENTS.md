@@ -47,11 +47,11 @@ RunCommand.run()
 
 ### Toolchain Detection Priority
 
-`ToolchainDetector.detect(in:)` returns `Toolchain?` — `nil` means a Dockerfile was found and should be built directly:
+`ToolchainDetector.detect(in:)` returns `Toolchain?` — `nil` means the workspace defines its own runtime and `spawn` should require explicit runtime selection:
 
 1. `.spawn.toml` `[toolchain] base = "..."` — explicit config
 2. `.devcontainer/devcontainer.json` — parsed by `DevcontainerParser`
-3. `Dockerfile` / `Containerfile` in repo root — returns nil
+3. `.devcontainer/devcontainer.json` with `build.dockerfile`, or a root `Dockerfile` / `Containerfile` — returns nil
 4. Auto-detect from repo files (`Cargo.toml` → rust, `go.mod` → go, `CMakeLists.txt` → cpp, JS/TS markers like `bun.lock`, `deno.json`, `package.json` → js). Note: `Makefile` alone does not trigger cpp — it's too common across languages.
 5. Fallback → `.base`
 

@@ -9,7 +9,8 @@ Sandboxed AI coding agents on macOS. Run Claude Code or Codex in filesystem-isol
 
 ```bash
 spawn build       # build container images (once)
-spawn .           # run Claude Code in current directory
+spawn             # run Claude Code in current directory
+spawn -- cargo test
 spawn doctor      # check local images, config, and workspace detection
 ```
 
@@ -47,16 +48,19 @@ spawn build
 spawn build rust    # also: base, cpp, go, js
 
 # Run Claude Code in your project
-spawn .
+spawn
 
 # Run Codex instead
-spawn . codex
+spawn codex
+
+# Run an arbitrary command
+spawn -- cargo test
 
 # Full auto mode (no permission prompts)
-spawn . --yolo
+spawn --yolo
 
 # Drop into a shell for debugging
-spawn . --shell
+spawn --shell
 
 # Check your local setup and current workspace
 spawn doctor
@@ -68,6 +72,6 @@ spawn doctor
 
 - **Auto-detects your project's toolchain** (C++, Rust, Go, JS/TS) and picks the right container image
 - **Safe mode by default** -- prompts before `git push`, PR creation, and other remote-write operations
-- **Mounts git config and SSH keys** so the agent can commit and push
+- **Uses explicit access profiles** -- default `minimal`, with opt-in `git` and `trusted` host auth exposure
 - **Persists OAuth credentials** across runs -- authenticate once, not every session
 - **No API keys required** -- Pro/Max plan users authenticate via OAuth

@@ -22,6 +22,81 @@ enum Toolchain: String, CaseIterable, Sendable {
     }
 }
 
+/// Controls which host identity and credential material is exposed inside the container.
+enum AccessProfile: String, CaseIterable, Sendable {
+    case minimal
+    case git
+    case trusted
+
+    var mountsGitConfig: Bool {
+        switch self {
+        case .minimal:
+            false
+        case .git, .trusted:
+            true
+        }
+    }
+
+    var mountsGitHubCLIConfig: Bool {
+        switch self {
+        case .minimal:
+            false
+        case .git, .trusted:
+            true
+        }
+    }
+
+    var mountsSSHKeys: Bool {
+        switch self {
+        case .trusted:
+            true
+        case .minimal, .git:
+            false
+        }
+    }
+
+    /// Parse an access profile name, throwing a clear error if invalid.
+    static func parse(_ name: String) throws -> AccessProfile {
+        guard let profile = AccessProfile(rawValue: name) else {
+            let valid = AccessProfile.allCases.map(\.rawValue).joined(separator: ", ")
+            throw ValidationError("Unknown access profile: \(name). Use: \(valid).")
+        }
+        return profile
+    }
+}
+
+/// Parsed workspace defaults from `.spawn.toml`.
+struct WorkspaceConfig: Sendable, Equatable {
+    let toolchainName: String?
+    let agentName: String?
+    let accessName: String?
+
+    var toolchain: Toolchain? {
+        guard let toolchainName else { return nil }
+        return Toolchain(rawValue: toolchainName)
+    }
+
+    var accessProfile: AccessProfile? {
+        guard let accessName else { return nil }
+        return AccessProfile(rawValue: accessName)
+    }
+}
+
+/// Controls how the runtime image is selected for a workspace.
+enum RuntimeMode: String, CaseIterable, Sendable {
+    case auto
+    case spawn
+    case workspaceImage = "workspace-image"
+
+    static func parse(_ name: String) throws -> RuntimeMode {
+        guard let mode = RuntimeMode(rawValue: name) else {
+            let valid = RuntimeMode.allCases.map(\.rawValue).joined(separator: ", ")
+            throw ValidationError("Unknown runtime mode: \(name). Use: \(valid).")
+        }
+        return mode
+    }
+}
+
 /// A host-to-guest filesystem mount for the container.
 struct Mount: Sendable {
     let hostPath: String

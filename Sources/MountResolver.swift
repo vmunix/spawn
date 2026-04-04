@@ -1,6 +1,6 @@
 import Foundation
 
-/// Builds the full mount list for a container run (workspace, git/SSH, agent state).
+/// Builds the full mount list for a container run (workspace, selected host auth, agent state).
 enum MountResolver: Sendable {
     /// Ensure a directory exists, logging a warning on failure.
     private static func ensureDirectory(_ dir: URL, label: String, using fm: FileManager) {
@@ -11,13 +11,13 @@ enum MountResolver: Sendable {
         }
     }
 
-    /// Resolve all mounts for the given target directory, agent, and options.
-    /// Copies git/SSH configs to the XDG state dir to work around VirtioFS uid issues.
+    /// Resolve all mounts for the given target directory, agent, and access profile.
+    /// Copies selected host auth material to the XDG state dir to work around VirtioFS uid issues.
     static func resolve(
         target: URL,
         additional: [String],
         readOnly: [String],
-        includeGit: Bool,
+        access: AccessProfile,
         agent: String
     ) -> [Mount] {
         let fm = FileManager.default
@@ -37,15 +37,15 @@ enum MountResolver: Sendable {
             mounts.append(Mount(hostPath: path, readOnly: true))
         }
 
-        // Git/SSH mounts
+        // Selected host auth mounts
         // VirtioFS preserves host file ownership/permissions, so files owned by the
         // macOS user (uid 501) with 600 permissions are unreadable by the container's
         // coder user (uid 1001). We copy to the XDG state dir where we control
         // permissions, and mount the copies. The Containerfile has symlinks from
         // the expected paths into these mount points.
-        if includeGit {
-            let home = fm.homeDirectoryForCurrentUser
+        let home = fm.homeDirectoryForCurrentUser
 
+        if access.mountsGitConfig {
             let gitconfig = home.appendingPathComponent(".gitconfig")
             if fm.fileExists(atPath: gitconfig.path) {
                 let gitDir = stateDir.appendingPathComponent("git")
@@ -65,6 +65,9 @@ enum MountResolver: Sendable {
                     ))
             }
 
+        }
+
+        if access.mountsSSHKeys {
             let sshDir = home.appendingPathComponent(".ssh")
             if fm.fileExists(atPath: sshDir.path) {
                 let sshCopy = stateDir.appendingPathComponent("ssh")
@@ -107,6 +110,9 @@ enum MountResolver: Sendable {
                     ))
             }
 
+        }
+
+        if access.mountsGitHubCLIConfig {
             // GitHub CLI auth config (~/.config/gh/) — only copy auth and config files
             let ghDir = home.appendingPathComponent(".config/gh")
             if fm.fileExists(atPath: ghDir.path) {

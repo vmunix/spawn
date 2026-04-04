@@ -3,30 +3,39 @@ import Foundation
 
 extension Spawn {
     struct Run: AsyncParsableCommand {
+        struct LaunchRequest: Sendable, Equatable {
+            let workspace: URL
+            let agent: String
+            let workspaceConfig: WorkspaceConfig?
+        }
+
         static let configuration = CommandConfiguration(
-            abstract: "Run an AI coding agent in a sandboxed container.",
+            abstract: "Run an AI coding agent or arbitrary command in a sandboxed container.",
             discussion: """
                 Examples:
-                  spawn .                         Run Claude Code in the current directory
-                  spawn . codex                   Run Codex instead
-                  spawn ~/code/project --shell    Open a shell in the workspace container
-                  spawn . --toolchain js          Force the JS/TS runtime image
-                  spawn . --toolchain rust        Override auto-detection
-                  spawn . --yolo                  Disable safe-mode prompts
+                  spawn                           Run Claude Code in the current directory
+                  spawn codex                     Run Codex instead
+                  spawn -- cargo test             Run an arbitrary command in the workspace container
+                  spawn -C ~/code/project -- swift test
+                  spawn --shell                   Open a shell in the workspace container
+                  spawn -C ~/code/project         Run in another workspace
+                  spawn --access git              Mount git identity and gh auth, but not SSH keys
+                  spawn --toolchain js            Force the JS/TS runtime image
+                  spawn --yolo                    Disable safe-mode prompts
 
                 Safe mode is the default. It keeps local coding workflows smooth while
                 gating remote-write git and gh operations inside the container.
                 """
         )
 
-        @Argument(
-            help: "Directory to mount as workspace (e.g., '.').",
-            transform: { URL(fileURLWithPath: $0).standardizedFileURL }
-        )
-        var path: URL
-
         @Argument(help: "Agent to run: claude-code, codex.")
-        var agent: String = "claude-code"
+        var agent: String?
+
+        @Argument(parsing: .captureForPassthrough, help: "Command to run inside the workspace container after '--'.")
+        var command: [String] = []
+
+        @Option(name: [.short, .long], help: "Directory to mount as workspace (default: current directory).")
+        var cwd: String?
 
         @Option(name: .long, help: "Additional directory to mount (repeatable).")
         var mount: [String] = []
@@ -55,8 +64,11 @@ extension Spawn {
         @Flag(name: .long, help: "Drop into shell instead of running agent.")
         var shell: Bool = false
 
-        @Flag(name: .customLong("no-git"), help: "Don't mount ~/.gitconfig or SSH.")
-        var noGit: Bool = false
+        @Option(name: .long, help: "Host access profile: minimal, git, trusted.")
+        var access: String?
+
+        @Option(name: .long, help: "Runtime mode: auto, spawn, workspace-image.")
+        var runtime: String = RuntimeMode.auto.rawValue
 
         @Flag(name: .long, help: "Show container commands.")
         var verbose: Bool = false
@@ -64,16 +76,30 @@ extension Spawn {
         @Flag(name: .long, help: "Skip permission gates (default: safe mode, prompts before git push).")
         var yolo: Bool = false
 
+        private static func sessionDescription(shell: Bool, command: [String]) -> String {
+            if shell {
+                return "shell (/bin/bash)"
+            }
+
+            if !command.isEmpty {
+                return "command (\(command.joined(separator: " ")))"
+            }
+
+            return "agent entrypoint"
+        }
+
         static func launchSummaryLines(
             workspace: URL,
             agent: String,
             shell: Bool,
+            command: [String],
             yolo: Bool,
+            runtimeMode: RuntimeMode,
             toolchainWasOverridden: Bool,
             detection: ToolchainDetector.Inspection,
             resolvedToolchain: Toolchain,
             image: String,
-            noGit: Bool,
+            accessProfile: AccessProfile,
             extraMountCount: Int,
             readOnlyMountCount: Int,
             envCount: Int,
@@ -91,11 +117,12 @@ extension Spawn {
                 "Launch summary:",
                 "  workspace: \(workspace.path)",
                 "  agent: \(agent)",
-                shell ? "  session: shell (/bin/bash)" : "  session: agent entrypoint",
+                "  session: \(sessionDescription(shell: shell, command: command))",
                 yolo ? "  mode: yolo" : "  mode: safe",
+                "  runtime: \(runtimeMode.rawValue)",
+                "  access: \(accessProfile.rawValue)",
                 "  toolchain: \(toolchainDetail)",
                 "  image: \(image)",
-                noGit ? "  git/ssh: disabled" : "  git/ssh: mounted",
                 "  extra mounts: \(extraMountCount) read-write, \(readOnlyMountCount) read-only",
                 "  environment: \(envCount) variable\(envCount == 1 ? "" : "s")",
                 "  resources: \(cpus) CPU, \(memory) memory",
@@ -112,11 +139,77 @@ extension Spawn {
             }
         }
 
+        static func requiresExplicitRuntimeSelection(for source: ToolchainDetector.Source) -> Bool {
+            switch source {
+            case .dockerfile, .devcontainerDockerfile:
+                true
+            case .spawnToml, .devcontainer, .cargo, .goMod, .cmake, .bunLock, .denoConfig, .denoLock, .pnpmLock, .yarnLock, .packageLock, .packageJSON, .fallback:
+                false
+            }
+        }
+
+        static func runtimeSelectionError(for source: ToolchainDetector.Source) -> SpawnError {
+            switch source {
+            case .dockerfile:
+                return .runtimeError(
+                    "This workspace defines a Dockerfile/Containerfile. Pass '--runtime spawn' to use spawn-managed images for now. '--runtime workspace-image' is reserved for future support."
+                )
+            case .devcontainerDockerfile:
+                return .runtimeError(
+                    "This workspace uses .devcontainer/devcontainer.json with build.dockerfile. Pass '--runtime spawn' to use spawn-managed images for now. '--runtime workspace-image' is reserved for future support."
+                )
+            case .spawnToml, .devcontainer, .cargo, .goMod, .cmake, .bunLock, .denoConfig, .denoLock, .pnpmLock, .yarnLock, .packageLock, .packageJSON, .fallback:
+                return .runtimeError("Runtime selection error")
+            }
+        }
+
+        static func resolveLaunchRequest(
+            agent: String?,
+            cwdOverride: String?,
+            currentDirectory: URL
+        ) throws -> LaunchRequest {
+            if let cwdOverride {
+                try validateDirectory(at: cwdOverride, label: "Workspace path")
+            }
+
+            let workspace = URL(fileURLWithPath: cwdOverride ?? currentDirectory.path).standardizedFileURL
+            let workspaceConfig = ToolchainDetector.loadWorkspaceConfig(in: workspace)
+            let resolvedAgent = agent ?? workspaceConfig?.agentName ?? AgentProfile.claudeCode.name
+
+            if AgentProfile.named(resolvedAgent) == nil {
+                var isDirectory: ObjCBool = false
+                if FileManager.default.fileExists(atPath: resolvedAgent, isDirectory: &isDirectory), isDirectory.boolValue {
+                    throw ValidationError("Workspace paths are selected with -C/--cwd. Example: spawn -C \(resolvedAgent)")
+                }
+
+                throw ValidationError("Unknown agent: \(resolvedAgent). Use 'claude-code' or 'codex'.")
+            }
+
+            return LaunchRequest(
+                workspace: workspace,
+                agent: resolvedAgent,
+                workspaceConfig: workspaceConfig
+            )
+        }
+
         mutating func run() async throws {
             if verbose { logger.logLevel = .debug }
 
+            if shell, !command.isEmpty {
+                throw ValidationError("Use either --shell or '-- <command...>', not both.")
+            }
+
+            let launchRequest = try Self.resolveLaunchRequest(
+                agent: agent,
+                cwdOverride: cwd,
+                currentDirectory: URL(fileURLWithPath: FileManager.default.currentDirectoryPath).standardizedFileURL
+            )
+            let path = launchRequest.workspace
+            let agent = launchRequest.agent
+            let workspaceConfig = launchRequest.workspaceConfig
+
             // Validate workspace path
-            try Self.validateDirectory(at: path.path, label: "Path")
+            try Self.validateDirectory(at: path.path, label: "Workspace path")
 
             // Validate additional mount paths
             for mountPath in mount {
@@ -132,9 +225,20 @@ extension Spawn {
             guard let profile = AgentProfile.named(agent) else {
                 throw ValidationError("Unknown agent: \(agent). Use 'claude-code' or 'codex'.")
             }
+            let resolvedAccess = access ?? workspaceConfig?.accessName ?? AccessProfile.minimal.rawValue
+            let accessProfile = try AccessProfile.parse(resolvedAccess)
+            let runtimeMode = try RuntimeMode.parse(runtime)
 
             // Resolve toolchain
             let detection = ToolchainDetector.inspect(in: path)
+            if runtimeMode == .workspaceImage {
+                throw SpawnError.runtimeError(
+                    "Workspace-image runtime is not implemented yet. For now use '--runtime spawn' to run with spawn-managed images."
+                )
+            }
+            if runtimeMode == .auto, Self.requiresExplicitRuntimeSelection(for: detection.source) {
+                throw Self.runtimeSelectionError(for: detection.source)
+            }
             let resolvedToolchain: Toolchain
             if let override = toolchain {
                 resolvedToolchain = try Toolchain.parse(override)
@@ -143,7 +247,7 @@ extension Spawn {
             }
 
             // Seed Claude Code safe-mode permissions
-            if !yolo, agent == "claude-code" {
+            if !yolo, command.isEmpty, !shell, agent == "claude-code" {
                 let claudeSettingsDir = Paths.stateDir.appendingPathComponent(agent)
                     .appendingPathComponent("claude")
                 SettingsSeeder.seed(settingsDir: claudeSettingsDir)
@@ -177,7 +281,7 @@ extension Spawn {
                 target: path,
                 additional: mount,
                 readOnly: readOnlyMounts,
-                includeGit: !noGit,
+                access: accessProfile,
                 agent: agent
             )
 
@@ -207,7 +311,14 @@ extension Spawn {
             // Credentials are persisted in $XDG_STATE_HOME/spawn/<agent>/ across runs.
 
             // Determine entrypoint
-            let entrypoint = shell ? ["/bin/bash"] : (yolo ? profile.yoloEntrypoint : profile.safeEntrypoint)
+            let entrypoint: [String]
+            if shell {
+                entrypoint = ["/bin/bash"]
+            } else if !command.isEmpty {
+                entrypoint = command
+            } else {
+                entrypoint = yolo ? profile.yoloEntrypoint : profile.safeEntrypoint
+            }
 
             // Working directory — derived from the primary mount's guest path
             let workdir = resolvedMounts[0].guestPath
@@ -216,12 +327,14 @@ extension Spawn {
                 workspace: path,
                 agent: agent,
                 shell: shell,
+                command: command,
                 yolo: yolo,
+                runtimeMode: runtimeMode,
                 toolchainWasOverridden: toolchain != nil,
                 detection: detection,
                 resolvedToolchain: resolvedToolchain,
                 image: resolvedImage,
-                noGit: noGit,
+                accessProfile: accessProfile,
                 extraMountCount: mount.count,
                 readOnlyMountCount: readOnlyMounts.count,
                 envCount: environment.count,

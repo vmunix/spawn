@@ -5,6 +5,7 @@ enum ToolchainDetector: Sendable {
     enum Source: Sendable, Equatable {
         case spawnToml
         case devcontainer
+        case devcontainerDockerfile
         case dockerfile
         case cargo
         case goMod
@@ -24,6 +25,8 @@ enum ToolchainDetector: Sendable {
                 ".spawn.toml"
             case .devcontainer:
                 ".devcontainer/devcontainer.json"
+            case .devcontainerDockerfile:
+                ".devcontainer/devcontainer.json (build.dockerfile)"
             case .dockerfile:
                 "workspace has Dockerfile/Containerfile"
             case .cargo:
@@ -58,15 +61,13 @@ enum ToolchainDetector: Sendable {
     }
 
     /// Returns the resolved toolchain plus the source that drove the decision.
-    /// `toolchain == nil` means a Dockerfile/Containerfile was found.
+    /// `toolchain == nil` means the workspace defines its own runtime and `spawn`
+    /// should require explicit runtime selection instead of silently guessing.
     static func inspect(in directory: URL) -> Inspection {
         let fm = FileManager.default
 
         // Priority 1: .spawn.toml
-        let spawnToml = directory.appendingPathComponent(".spawn.toml")
-        if fm.fileExists(atPath: spawnToml.path),
-            let toolchain = parseSpawnToml(at: spawnToml)
-        {
+        if let config = loadWorkspaceConfig(in: directory), let toolchain = config.toolchain {
             return Inspection(toolchain: toolchain, source: .spawnToml)
         }
 
@@ -76,9 +77,14 @@ enum ToolchainDetector: Sendable {
             .appendingPathComponent(".devcontainer")
             .appendingPathComponent("devcontainer.json")
         if fm.fileExists(atPath: devcontainer.path),
-            let toolchain = parseDevcontainer(at: devcontainer)
+            let config = parseDevcontainer(at: devcontainer)
         {
-            return Inspection(toolchain: toolchain, source: .devcontainer)
+            if let toolchain = config.toolchain {
+                return Inspection(toolchain: toolchain, source: .devcontainer)
+            }
+            if config.dockerfile != nil {
+                return Inspection(toolchain: nil, source: .devcontainerDockerfile)
+            }
         }
 
         // Priority 3: Dockerfile / Containerfile
@@ -90,10 +96,17 @@ enum ToolchainDetector: Sendable {
         return autoDetect(in: directory)
     }
 
-    /// Returns nil when a Dockerfile/Containerfile is found (caller should build it directly).
+    /// Returns nil when the workspace defines its own runtime.
     /// Returns a Toolchain when a spawn-* image variant should be used.
     static func detect(in directory: URL) -> Toolchain? {
         inspect(in: directory).toolchain
+    }
+
+    /// Loads `.spawn.toml` workspace defaults when present.
+    static func loadWorkspaceConfig(in directory: URL) -> WorkspaceConfig? {
+        let spawnToml = directory.appendingPathComponent(".spawn.toml")
+        guard FileManager.default.fileExists(atPath: spawnToml.path) else { return nil }
+        return parseSpawnToml(at: spawnToml)
     }
 
     private static func autoDetect(in directory: URL) -> Inspection {
@@ -134,35 +147,59 @@ enum ToolchainDetector: Sendable {
         return Inspection(toolchain: .base, source: .fallback)
     }
 
-    private static func parseSpawnToml(at url: URL) -> Toolchain? {
+    private static func parseSpawnToml(at url: URL) -> WorkspaceConfig? {
         guard let content = try? String(contentsOf: url, encoding: .utf8) else { return nil }
-        var inToolchainSection = false
+        var section: String?
+        var toolchainName: String?
+        var agentName: String?
+        var accessName: String?
+
         for line in content.components(separatedBy: .newlines) {
             let trimmed = line.trimmingCharacters(in: .whitespaces)
+            guard !trimmed.isEmpty, !trimmed.hasPrefix("#") else { continue }
+
             // Track TOML sections
             if trimmed.hasPrefix("[") {
-                inToolchainSection = trimmed.hasPrefix("[toolchain]")
+                section =
+                    if trimmed.hasPrefix("[toolchain]") {
+                        "toolchain"
+                    } else if trimmed.hasPrefix("[workspace]") {
+                        "workspace"
+                    } else {
+                        nil
+                    }
                 continue
             }
-            guard inToolchainSection else { continue }
-            // Match "base = ..." precisely
-            let normalized = trimmed.replacingOccurrences(of: " ", with: "")
-            if normalized.hasPrefix("base=") {
-                let value =
-                    trimmed
-                    .split(separator: "=", maxSplits: 1).last?
-                    .trimmingCharacters(in: .whitespaces)
-                    .trimmingCharacters(in: CharacterSet(charactersIn: "\"'"))
-                if let value, let toolchain = Toolchain(rawValue: value) {
-                    return toolchain
-                }
+
+            guard let section else { continue }
+            let parts = trimmed.split(separator: "=", maxSplits: 1)
+            guard parts.count == 2 else { continue }
+
+            let key = parts[0].trimmingCharacters(in: .whitespaces)
+            let value = parts[1]
+                .trimmingCharacters(in: .whitespaces)
+                .trimmingCharacters(in: CharacterSet(charactersIn: "\"'"))
+
+            switch (section, key) {
+            case ("toolchain", "base"):
+                toolchainName = value
+            case ("workspace", "agent"):
+                agentName = value
+            case ("workspace", "access"):
+                accessName = value
+            default:
+                continue
             }
         }
-        return nil
+
+        return WorkspaceConfig(
+            toolchainName: toolchainName,
+            agentName: agentName,
+            accessName: accessName
+        )
     }
 
-    private static func parseDevcontainer(at url: URL) -> Toolchain? {
-        guard let config = DevcontainerConfig.parse(at: url) else { return nil }
-        return config.toolchain
+    private static func parseDevcontainer(at url: URL) -> DevcontainerConfig? {
+        DevcontainerConfig.parse(at: url)
     }
 }
