@@ -4,23 +4,29 @@ import Foundation
 extension Spawn {
     struct Image: ParsableCommand {
         static let configuration = CommandConfiguration(
-            abstract: "Manage spawn images.",
+            abstract: "Inspect or remove spawn-managed images.",
             discussion: """
                 Examples:
                   spawn image list
                   spawn image list --all
                   spawn image rm spawn-rust:latest
+
+                These commands operate on `spawn-*` images only. Workspace-image caches
+                are managed through `spawn --runtime workspace-image` and `spawn doctor`.
                 """,
             subcommands: [List.self, Remove.self]
         )
 
         struct List: ParsableCommand {
             static let configuration = CommandConfiguration(
-                abstract: "List available spawn images.",
+                abstract: "List local spawn-managed images.",
                 discussion: """
                     Examples:
                       spawn image list
                       spawn image list --all
+
+                    Use `--all` to show every local image from the container runtime,
+                    not just `spawn-*` images.
                     """
             )
 
@@ -69,7 +75,8 @@ extension Spawn {
                       spawn image rm spawn-go:latest spawn-rust:latest
 
                     `spawn image rm` only removes `spawn-*` images and refuses to remove
-                    `spawn-base`, since other spawn images depend on it.
+                    `spawn-base`, since other spawn images depend on it. It does not
+                    remove workspace-image caches.
                     """
             )
 

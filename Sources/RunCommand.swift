@@ -10,20 +10,33 @@ extension Spawn {
         }
 
         static let configuration = CommandConfiguration(
-            abstract: "Run an AI coding agent or arbitrary command in a sandboxed container.",
+            abstract: "Run an agent, shell, or arbitrary command in a workspace container.",
             discussion: """
-                Examples:
-                  spawn                           Run Claude Code in the current directory
-                  spawn codex                     Run Codex instead
-                  spawn -- cargo test             Run an arbitrary command in the workspace container
-                  spawn -C ~/code/project -- swift test
-                  spawn --shell                   Open a shell in the workspace container
-                  spawn -C ~/code/project         Run in another workspace
-                  spawn --access git              Mount git identity and gh auth, but not SSH keys
-                  spawn --runtime workspace-image --rebuild-workspace-image
-                                                  Force a rebuild of the workspace image
-                  spawn --toolchain js            Force the JS/TS runtime image
-                  spawn --yolo                    Disable safe-mode prompts
+                Launch forms:
+                  spawn                          Run the default agent in the current directory
+                  spawn codex                    Run Codex instead
+                  spawn -C ~/code/project        Run in another workspace
+                  spawn -- cargo test            Run a command in the workspace container
+                  spawn --shell                  Open a shell in the workspace container
+
+                Access profiles:
+                  --access minimal               Workspace and agent state only
+                  --access git                   Add git identity and gh auth
+                  --access trusted               Also expose copied SSH material
+
+                Runtime modes:
+                  --runtime auto                 Default; refuse to guess Dockerfile runtimes
+                  --runtime spawn                Use spawn-managed image selection
+                  --runtime workspace-image      Build or reuse a workspace runtime
+                  --rebuild-workspace-image      Ignore cache for workspace-image runs
+
+                Workspace defaults:
+                  .spawn.toml [workspace]        Default agent and access profile
+                  .spawn.toml [toolchain]        Default spawn-managed toolchain base
+
+                Other useful forms:
+                  spawn --toolchain js           Force the JS/TS spawn image
+                  spawn --yolo                   Disable safe-mode prompts
 
                 Safe mode is the default. It keeps local coding workflows smooth while
                 gating remote-write git and gh operations inside the container.

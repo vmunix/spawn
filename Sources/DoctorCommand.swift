@@ -65,9 +65,17 @@ extension Spawn {
                   spawn doctor --json
                   spawn doctor ~/code/project
 
-                Checks the container CLI, local images, default config paths, and the
-                workspace detection result spawn would use for a run. Use --json for
-                machine-readable output.
+                Human output covers:
+                  container CLI availability
+                  spawn-managed images
+                  env file and persisted agent state
+                  workspace detection, defaults, and runtime cache status
+
+                JSON output adds:
+                  checks[]               High-level health checks with status/title/detail
+                  workspace              Structured workspace result
+                  workspace.defaults     Configured agent/access defaults
+                  workspace.runtime      Workspace-image cache state and tracked paths
                 """
         )
 

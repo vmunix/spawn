@@ -4,7 +4,7 @@ import Foundation
 extension Spawn {
     struct Build: ParsableCommand {
         static let configuration = CommandConfiguration(
-            abstract: "Build or pull base images.",
+            abstract: "Build spawn-managed base and toolchain images.",
             discussion: """
                 Examples:
                   spawn build
@@ -12,7 +12,11 @@ extension Spawn {
                   spawn build js
                   spawn build base --memory 16g
 
-                Omit the toolchain to build all images. `spawn-base` is always built first.
+                Omit the toolchain to build all spawn-managed images. `spawn-base` is
+                always built first.
+
+                This command does not build workspace Dockerfile/devcontainer images.
+                Use `spawn --runtime workspace-image` to build those on demand.
                 """
         )
 

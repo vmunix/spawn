@@ -4,31 +4,42 @@ import ArgumentParser
 struct Spawn: AsyncParsableCommand {
     static let configuration = CommandConfiguration(
         commandName: "spawn",
-        abstract: "Sandboxed AI coding agents on macOS.",
+        abstract: "Workspace-first agent and command containers on macOS.",
         discussion: """
             Quick start:
-              spawn build              Build container images (required once)
-              spawn                    Run Claude Code in the current directory
+              spawn                    Run the default agent in the current directory
               spawn codex              Run Codex instead
               spawn -- cargo test      Run a command in the workspace container
               spawn --shell            Open a shell in the workspace container
               spawn -C ~/code/project  Run in another workspace
               spawn doctor             Check images, config, and workspace detection
-              spawn doctor --json      Emit machine-readable doctor output
+              spawn doctor --json      Machine-readable diagnostics
 
-            Common workflows:
-              spawn shell <id>         Open a shell in a running container
+            Runtime selection:
+              --runtime auto            Default; refuse to guess Dockerfile runtimes
+              --runtime spawn           Use spawn-managed images
+              --runtime workspace-image Use a workspace Dockerfile/devcontainer build
+              --rebuild-workspace-image Force a rebuild for workspace-image runs
+
+            Workspace defaults:
+              .spawn.toml [workspace]   Default agent and access profile
+              .spawn.toml [toolchain]   Default spawn-managed toolchain base
+
+            Operational commands:
+              spawn build              Build spawn-managed images
+              spawn image list         Show locally built spawn-managed images
+              spawn list               List running containers
               spawn exec <id> -- ls    Run a one-off command in a running container
-              spawn image list         Show locally built spawn images
+              spawn shell <id>         Open a shell in a running container
+              spawn stop <id>          Stop a running container
 
             Common run options:
               --yolo                   Skip permission gates (default: safe mode)
               --access <name>          Host access profile (minimal/git/trusted)
               --shell                  Drop into a shell instead of running an agent
-              --runtime <name>         Runtime mode (auto/spawn/workspace-image)
-              --rebuild-workspace-image
-                                        Force a rebuild for workspace-image runs
-              --toolchain <name>       Override auto-detected toolchain (base/cpp/rust/go/js)
+              --toolchain <name>       Override toolchain (base/cpp/rust/go/js)
+
+            Bare invocations route to `spawn run`. Use `spawn help run` for launch options.
             """,
         version: "0.2.0",
         subcommands: [Run.self, Build.self, Image.self, List.self, Stop.self, Exec.self, Shell.self, Doctor.self],

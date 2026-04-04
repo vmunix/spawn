@@ -6,6 +6,16 @@ Keep [CLAUDE.md](CLAUDE.md) aligned with this file. Prefer updating this file fi
 
 Use [README.md](README.md) as the user-facing overview and `docs/` as the user documentation set.
 
+## CLI Discovery
+
+For CLI behavior, treat the built-in help surface as a first-class contract.
+
+- Start with `spawn --help` and `spawn help <subcommand>` to understand the current user-facing shape
+- Prefer the rendered help output over stale assumptions from older docs or commits
+- When changing CLI behavior, update the relevant `abstract`, `discussion`, option help text, and usage examples in the command source
+- Keep help accurate for both humans and LLMs: front-door workflows first, operational commands second, caveats explicit
+- Preserve coverage in `Tests/CLIHelpTests.swift` when the discovery surface changes
+
 ## Build And Test
 
 ```bash

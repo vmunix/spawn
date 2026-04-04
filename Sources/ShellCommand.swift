@@ -9,7 +9,8 @@ extension Spawn {
                 Example:
                   spawn shell 3f2b8d4f
 
-                This is a shortcut for `spawn exec <id> -- /bin/bash`.
+                Use a container ID from `spawn list`. This is a shortcut for
+                `spawn exec <id> -- /bin/bash`.
                 """
         )
 
