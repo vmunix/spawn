@@ -1,179 +1,170 @@
 # AGENTS.md
 
-This file provides guidance to Codex-style coding agents when working with code in this repository.
+This file is the authoritative repository guidance for coding agents working in this repo.
 
-Keep this file aligned with [CLAUDE.md](CLAUDE.md). Only agent-specific wording should differ.
+Keep [CLAUDE.md](CLAUDE.md) aligned with this file. Prefer updating this file first and keeping any agent-specific wrapper minimal.
 
-## Build & Test Commands
+Use [README.md](README.md) as the user-facing overview and `docs/` as the user documentation set.
+
+## Build And Test
 
 ```bash
-swift build                            # Debug build
-swift build -c release                 # Release build
-swift test                             # Run all tests
-swift test --filter ToolchainDetector  # Run tests in one file
-swift test --filter "detectsRust"      # Run a single test by name
-swift run spawn .                      # Run from source (defaults to claude-code agent)
-swift run spawn . codex --verbose      # Run Codex with verbose container output
-make build                             # Release build
-make test                              # Lint + run tests
-make lint                              # Run swift-format linter
-make format                            # Auto-fix formatting in-place
-make smoke                             # End-to-end smoke tests (cpp/go/rust fixtures in containers)
-make install                           # Install to ~/.local/bin
+swift build                              # Debug build
+swift build -c release                   # Release build
+swift test                               # Run all tests
+swift test --filter ToolchainDetector    # Run one test file
+swift test --filter "detectsRust"        # Run one test by name
+swift run spawn                          # Run from source in current directory
+swift run spawn codex --verbose          # Run Codex with verbose logging
+swift run spawn doctor --json            # Machine-readable doctor output
+make build                               # Release build
+make test                                # Lint + full test suite
+make lint                                # swift-format lint
+make format                              # Auto-format in place
+make smoke                               # End-to-end fixture runs in containers
+make install                             # Install to ~/.local/bin
 ```
 
-## Pre-commit
+Always run `make test` before `git commit` or `git push`.
 
-Always run `make test` (lint + all tests) and fix any issues before `git commit` / `git push`.
+## Product Shape
 
-## Architecture
+`spawn` is a Swift CLI that wraps Apple's `container` CLI to run coding agents and arbitrary commands in macOS-hosted Linux containers.
 
-`spawn` is a Swift CLI that wraps Apple's `container` tool to run AI coding agents (Claude Code, Codex) in filesystem-isolated Linux VMs on macOS. The user runs `spawn .` from a repo directory; the tool auto-detects the toolchain, selects the right container image, mounts only the specified directories, and launches the agent.
+Current front-door UX:
 
-### Run Command Pipeline
+- `spawn` runs the default agent from the current directory
+- `spawn codex` switches agents
+- `spawn -- <command...>` runs an arbitrary command in the workspace container
+- `spawn -C <dir>` selects another workspace
+- `spawn --shell` opens a shell
+- `spawn doctor` checks the local environment and workspace resolution
+- `spawn doctor --json` emits the same information in machine-readable form
 
-The `run` subcommand (default) orchestrates all modules in sequence:
+Important runtime controls:
 
-```
+- `--access minimal|git|trusted`
+- `--runtime auto|spawn|workspace-image`
+- `--rebuild-workspace-image` only with `--runtime workspace-image`
+- `.spawn.toml` may define `[workspace] agent/access` and `[toolchain] base`
+
+## Runtime Resolution
+
+`RunCommand` is workspace-first and follows this high-level flow:
+
+```text
 RunCommand.run()
-  → AgentProfile.named()          # Validate agent (claude-code/codex)
-  → SettingsSeeder.seed()         # Seed safe-mode permissions (claude-code only)
-  → ToolchainDetector.detect()    # Auto-detect or use override
-  → ImageResolver.resolve()       # Map toolchain to image name
-  → MountResolver.resolve()       # Build mount list (workspace + git/SSH + agent state)
-  → EnvLoader.load/loadDefault()  # Load env vars from ~/.config/spawn/env
-  → ContainerRunner.run()         # Build args, execv (TTY) or Process (pipe)
+  → resolveLaunchRequest()               # workspace + agent defaults
+  → AgentProfile.named()                 # validate agent
+  → validateRuntimeOptions()             # runtime / image / toolchain consistency
+  → ToolchainDetector.inspect()          # detect toolchain or workspace runtime
+  → WorkspaceImageRuntime.ensureBuilt()  # when using --runtime workspace-image
+    or ImageResolver.resolve()           # when using spawn-managed runtimes
+  → MountResolver.resolve()              # workspace, auth, agent state
+  → EnvLoader.load/loadDefault()         # env file / defaults
+  → ContainerRunner.run()                # execv for TTY, Process otherwise
 ```
 
-### Toolchain Detection Priority
+Toolchain detection priority:
 
-`ToolchainDetector.detect(in:)` returns `Toolchain?` — `nil` means the workspace defines its own runtime and `spawn` should require explicit runtime selection:
+1. `.spawn.toml` `[toolchain] base = "..."`
+2. `.devcontainer/devcontainer.json` image or features
+3. `.devcontainer/devcontainer.json` with `build.dockerfile`, or root `Dockerfile` / `Containerfile`
+4. file heuristics: `Cargo.toml`, `go.mod`, `CMakeLists.txt`, `bun.lock`, `deno.json`, `package.json`, etc.
+5. fallback to `base`
 
-1. `.spawn.toml` `[toolchain] base = "..."` — explicit config
-2. `.devcontainer/devcontainer.json` — parsed by `DevcontainerParser`
-3. `.devcontainer/devcontainer.json` with `build.dockerfile`, or a root `Dockerfile` / `Containerfile` — returns nil
-4. Auto-detect from repo files (`Cargo.toml` → rust, `go.mod` → go, `CMakeLists.txt` → cpp, JS/TS markers like `bun.lock`, `deno.json`, `package.json` → js). Note: `Makefile` alone does not trigger cpp — it's too common across languages.
-5. Fallback → `.base`
+Interpretation:
 
-### Key Design Decisions
+- `--runtime auto` refuses to guess for workspace-defined runtimes
+- `--runtime spawn` ignores the workspace runtime and uses spawn-managed images
+- `--runtime workspace-image` builds or reuses a deterministic workspace image
 
-- **All container interaction goes through Apple's `container` CLI** (auto-detected at `/opt/homebrew/bin/container` or `/usr/local/bin/container`, falling back to PATH; overridable via `CONTAINER_PATH` env var). `ContainerRunner` constructs argument arrays and invokes it.
-- **`ContainerRunner.buildArgs()` is a pure function** — takes all inputs, returns `[String]`. This is what tests verify. The actual process execution (`ContainerRunner.run()`) is not unit tested since it requires the container runtime.
-- **TTY via `execv`**: When stdin is a real terminal, `ContainerRunner.run()` uses `execv` to replace the spawn process with `container`, giving it direct TTY access (required for `-t` flag and interactive I/O). When stdin is a pipe, it falls back to `Foundation.Process` with signal forwarding.
-- **Safe mode is the default**: Claude Code runs without `--dangerously-skip-permissions` and gets a seeded settings.json with deny rules for remote-write git/gh operations. Codex keeps `--full-auto` but git/gh wrapper scripts in the container intercept and prompt for remote-write operations. The `--yolo` flag restores full-auto behavior for both agents.
-- **OAuth credential persistence**: Agent credentials are stored in `~/.local/state/spawn/<agent>/` on the host, mounted into containers so users authenticate once. No API keys required for Pro/Max plan users.
-- **VirtioFS limitation**: Single-file bind mounts don't support atomic rename (EBUSY). `~/.claude.json` is a symlink into a directory mount (`~/.claude-state/`) to work around this.
-- **Containerfile content is embedded in `ContainerfileTemplates.swift`** as string literals so `spawn build` works after installation (no dependency on repo file paths).
-- **Claude Code uses the native installer** (not npm) — installed as `coder` user at `/home/coder/.local/bin/claude`.
+## Workspace-Image Runtime
+
+`WorkspaceImageRuntime` handles workspaces with a root `Dockerfile` / `Containerfile` or `.devcontainer/devcontainer.json` using `build.dockerfile`.
+
+Current behavior:
+
+- image names are deterministic per workspace path
+- cache metadata is stored under spawn state
+- cached workspace images are reused until tracked inputs change
+- tracked inputs include the Dockerfile, optional devcontainer config, and build-context file metadata
+- `--rebuild-workspace-image` forces a rebuild even if the cache is current
+
+`spawn doctor` should make these decisions inspectable. `spawn doctor --json` exposes a stable structured `workspace.runtime` payload with cache fields and tracked paths.
+
+## Access And Safety
+
+Access profiles and action permissions are separate concerns.
+
+- `minimal` mounts workspace, requested mounts, and persisted agent state only
+- `git` additionally mounts copied git config and `gh` config
+- `trusted` additionally mounts copied SSH material
+- safe mode remains the default
+- `--yolo` disables permission gates
+
+Do not broaden default secret exposure casually. The current direction is explicit, opt-in host auth exposure.
+
+## Important Design Constraints
+
+- All container interaction goes through `ContainerRunner`
+- `ContainerRunner.buildArgs()` is pure and heavily tested
+- Interactive TTY runs use `execv`; non-TTY runs use `Foundation.Process`
+- Agent auth state is persisted under `~/.local/state/spawn/<agent>/`
+- Single-file bind mounts are avoided where VirtioFS rename behavior is problematic
+- Embedded `ContainerfileTemplates.swift` keeps `spawn build` self-contained after installation
 
 ## Testing
 
-Tests use Swift 6.3's built-in `Testing` framework.
+Tests use Swift 6's `Testing` framework, not XCTest.
 
-- Tests use `@Test func` and `#expect()` — not XCTest
-- `make test` prefers `/Applications/Xcode.app/Contents/Developer` when available because the Command Line Tools copy of `swift test` may not resolve `Testing.framework` correctly
-- `Tests/TestHelpers.swift` provides `makeTempDir(files:)` for creating temporary directory fixtures with specified file contents
-- Temp directories are auto-cleaned on first `makeTempDir` call per test run
-- `TestHelpers.swift` imports Foundation; test files import `Testing` and `@testable import spawn`
+- Use `@Test` and `#expect`
+- `Tests/TestHelpers.swift` provides `makeTempDir(files:)`
+- `make test` prefers Xcode when available because CLT Swift can be incomplete for this setup
+- `make smoke` exercises the fixture workspaces under `fixtures/`
 
-### Smoke Tests
+Favor pure-function tests when possible:
 
-`make smoke` runs end-to-end tests using fixture projects in `fixtures/`:
+- parser and launch-request resolution
+- image/runtime resolution
+- mount/env construction
+- doctor reporting and JSON rendering
+- workspace-image cache decisions
 
-| Fixture | Toolchain | What it tests |
-|---------|-----------|---------------|
-| `fixtures/cpp-sample/` | cpp (clang-21) | CMake + Ninja build, ctest |
-| `fixtures/go-sample/` | go | `go build` + `go test` |
-| `fixtures/rust-sample/` | rust | `cargo build` + `cargo test` |
-| `fixtures/node-sample/` | js | `node --test` |
-| `fixtures/bun-sample/` | js | `bun test` |
-| `fixtures/deno-sample/` | js | `deno test` |
+## Module Map
 
-Each fixture is a minimal but buildable/testable project. Spawn auto-detects the toolchain, selects the image, and runs build+test inside the container. Requires images to be built first (`spawn build`).
+Key files:
 
-## Module Reference
-
-| Module | Responsibility |
-|--------|---------------|
-| `BuildCommand.swift` | Writes embedded template to temp file, invokes `container build` with `--cpus`/`--memory` flags (default 4/8g), enforces base-first ordering |
-| `CLI.swift` | `@main` entry point, `Spawn` root command with subcommand registration |
-| `ContainerRunner.swift` | `buildArgs()` pure function + `run()` via execv/Process + `runRaw()` passthrough + `runCapture()` stdout capture; redacts env vars in debug logs; caches preflight result |
-| `ContainerfileTemplates.swift` | Embedded Containerfile strings for base/cpp (clang-21)/rust/go; parameterized version constants |
-| `DevcontainerParser.swift` | Parses devcontainer.json: image, build.dockerfile, features, containerEnv |
-| `EnvLoader.swift` | Parses KEY=VALUE files (comments, quotes), validates required vars, `parseKeyValue(_:)` utility |
-| `ImageChecker.swift` | Pre-flight image existence check against container CLI's image store |
-| `ImageCommand.swift` | `spawn image` group: `list` (filters to spawn-*), `rm` (safety-validated, spawn-* only) |
-| `ImageResolver.swift` | `Toolchain` → `"spawn-{toolchain}:latest"`, validates via inline OCI regex |
-| `Log.swift` | Shared `Logger` instance (swift-log), bootstrapped to stderr, default level `.warning` |
-| `MountResolver.swift` | Builds mount list; copies git/SSH with symlink filtering and 0600 permissions on private keys |
-| `Paths.swift` | XDG Base Directory path resolution (configDir, stateDir) |
-| `SettingsSeeder.swift` | Seeds Claude Code's settings.json with safe-mode permission rules (allow local ops, deny remote-write git/gh) |
-| `SpawnError.swift` | Structured runtime error type (containerFailed, containerNotFound, imageNotFound, runtimeError) |
-| `ToolchainDetector.swift` | Priority-ordered detection chain, delegates to `DevcontainerParser` |
-| `Types.swift` | `Toolchain` enum (with `imageName` and `parse()` helpers), `Mount` struct (two initializers: auto-derive guest path, or custom), `AgentProfile` |
+- `Sources/RunCommand.swift`: primary CLI flow
+- `Sources/DoctorCommand.swift`: environment/workspace diagnostics, human + JSON output
+- `Sources/WorkspaceImageRuntime.swift`: workspace-image planning, cache status, rebuild logic
+- `Sources/ToolchainDetector.swift`: detection and `.spawn.toml` loading
+- `Sources/MountResolver.swift`: workspace/auth/agent mounts
+- `Sources/ContainerRunner.swift`: container CLI boundary
+- `Sources/BuildCommand.swift`: spawn-managed image builds
+- `Sources/DevcontainerParser.swift`: devcontainer parsing
+- `Sources/Types.swift`: `Toolchain`, `AccessProfile`, `RuntimeMode`, `AgentProfile`, `Mount`
 
 ## Coding Conventions
 
-Aligned with Apple's `container` and `containerization` repos for consistency as we integrate the library.
+- Use `.swift-format`
+- Keep imports ordered
+- Prefer `guard` to deep nesting
+- Never force unwrap or force try
+- Mark types `Sendable`
+- Use `SpawnError` for runtime failures and `ValidationError` for CLI validation
+- Use `logger.debug()` for diagnostics and `print()` for user-facing status
+- Redact env values in verbose command logs
 
-### Formatting
+## Release And Distribution
 
-Use `.swift-format` (config in repo root). Key rules:
-- **Import ordering:** alphabetical, enforced by formatter
-- **Trailing commas:** always, for cleaner diffs
-- **Early exits:** prefer `guard` over nested `if`
-- **Never force unwrap or force try** — use `guard let`, `try?`, or propagate errors
-- **File-scoped privacy:** default to `private` for file-scoped declarations, explicit `public` on APIs
-- **Line length:** 180 characters max
+- Homebrew formula lives in `vmunix/homebrew-tap`
+- `make install` installs to `~/.local/bin`
+- Version is set in `Sources/CLI.swift`
+- Release flow: update version, tag, create GitHub release, update Homebrew formula checksum
 
-### Sendable
+## Editing Guidance
 
-Mark all types `Sendable` explicitly. Structs with `Sendable` members get it automatically, but declare it anyway for clarity. When wrapping non-Sendable resources, use `nonisolated(unsafe)` with `NSLock` protection.
-
-### Error Handling
-
-Use a structured error type with code classification rather than bare `ValidationError` from ArgumentParser:
-- Runtime errors (image not found, container failure) should use a dedicated `SpawnError` type
-- `ValidationError` is reserved for CLI argument validation only
-- Include context: error code, message, and optional cause
-
-### Documentation
-
-Document public types and non-obvious functions with `///` comments. Focus on:
-- Protocol requirements (parameter docs, throws/returns)
-- Non-obvious behavior or workarounds
-- Module-level type descriptions
-- Skip trivial getters/setters and self-evident code
-
-### Logging
-
-Uses [swift-log](https://github.com/apple/swift-log) with `StreamLogHandler.standardError`. A shared `logger` (in `Log.swift`) defaults to `.warning` (silent); commands set `.debug` when `--verbose` is passed. Use `logger.debug()` for diagnostic output (container commands, internal state). Keep `print()` for user-facing status messages (build progress, etc.). Environment variable values are redacted in debug output (`KEY=***`).
-
-### Security
-
-- **Mount paths are validated** — `--mount` and `--read-only` paths must exist and be directories
-- **SSH keys are copied, not mounted directly** — copied to XDG state dir with symlink filtering and 0600 permissions on private keys
-- **`spawn image rm` only removes `spawn-*` images** — protects base OS images and `spawn-base` (which other images depend on it)
-- **Env var values are redacted in `--verbose` output** — prevents credential leakage in logs
-
-### Future Patterns
-
-As spawn grows, adopt these patterns from the containerization library:
-- **Configuration structs with builder closures** for complex initialization (e.g., container config)
-- **Private state enums** with associated values for lifecycle management (e.g., VM states)
-
-## Distribution
-
-- **Homebrew (recommended):** `brew install vmunix/tap/spawn`. The formula lives in a dedicated tap repo at `github.com/vmunix/homebrew-tap` (local dev copy at `~/code/mm/homebrew-tap/`). The formula builds from a GitHub release tarball with `swift build -c release --disable-sandbox` and installs the binary to the Homebrew prefix.
-- **From source:** `make install` builds a release binary and installs to `~/.local/bin/` (XDG-aligned, no sudo). The `PREFIX` variable can be overridden: `PREFIX=/usr/local make install`.
-- **Versioning:** The current version (`0.2.0`) is set in `CLI.swift` via `CommandConfiguration.version`.
-- **Release workflow:** (1) Update version in `CLI.swift`, (2) `git tag vX.Y.Z && git push origin vX.Y.Z`, (3) `gh release create vX.Y.Z --title "vX.Y.Z" --notes "..."`, (4) `curl -sL https://github.com/vmunix/spawn/archive/refs/tags/vX.Y.Z.tar.gz | shasum -a 256`, (5) update `url` and `sha256` in `~/code/mm/homebrew-tap/Formula/spawn.rb`, (6) commit and push the tap repo. Source-only builds for now; pre-built binaries via GitHub Actions is a future enhancement.
-
-## Migration Path
-
-spawn currently shells out to Apple's `container` CLI for all container operations. The `containerization` Swift library dependency was removed to keep the dependency tree light and CI-friendly (the full library pulls in grpc-swift and other heavy transitive deps).
-
-- **Seam:** `ContainerRunner` is the boundary where all `container` CLI interaction happens. Future library integration replaces its internals without changing callers.
-- **Domain types:** spawn's `Mount`, `Toolchain`, etc. remain the domain model. Adapt to library types at the boundary only.
-- **OCI validation:** Inline regex replaces `ContainerizationOCI.Reference.parse()`. Image store checks use `JSONSerialization` instead of the library's `Descriptor` type.
-- **Next steps:** Re-add `Containerization` module when the library's transitive deps stabilize, to replace `container run` (VM lifecycle, VirtioFS, process I/O).
+- Keep this file concise and operational
+- Prefer updating facts over adding process prose
+- When product shape changes, update this file, `CLAUDE.md`, `README.md`, and relevant `docs/` pages in the same slice
