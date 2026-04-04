@@ -3,11 +3,7 @@ import Foundation
 
 extension Spawn {
     struct Run: AsyncParsableCommand {
-        struct LaunchRequest: Sendable, Equatable {
-            let workspace: URL
-            let agent: String
-            let workspaceConfig: WorkspaceConfig?
-        }
+        typealias LaunchRequest = RunLaunchRequest
 
         static let configuration = CommandConfiguration(
             abstract: "Run an agent, shell, or arbitrary command in a workspace container.",
@@ -243,27 +239,10 @@ extension Spawn {
             cwdOverride: String?,
             currentDirectory: URL
         ) throws -> LaunchRequest {
-            if let cwdOverride {
-                try validateDirectory(at: cwdOverride, label: "Workspace path")
-            }
-
-            let workspace = URL(fileURLWithPath: cwdOverride ?? currentDirectory.path).standardizedFileURL
-            let workspaceConfig = ToolchainDetector.loadWorkspaceConfig(in: workspace)
-            let resolvedAgent = agent ?? workspaceConfig?.agentName ?? AgentProfile.claudeCode.name
-
-            if AgentProfile.named(resolvedAgent) == nil {
-                var isDirectory: ObjCBool = false
-                if FileManager.default.fileExists(atPath: resolvedAgent, isDirectory: &isDirectory), isDirectory.boolValue {
-                    throw ValidationError("Workspace paths are selected with -C/--cwd. Example: spawn -C \(resolvedAgent)")
-                }
-
-                throw ValidationError("Unknown agent: \(resolvedAgent). Use 'claude-code' or 'codex'.")
-            }
-
-            return LaunchRequest(
-                workspace: workspace,
-                agent: resolvedAgent,
-                workspaceConfig: workspaceConfig
+            try RunLaunchResolver.resolve(
+                agent: agent,
+                cwdOverride: cwdOverride,
+                currentDirectory: currentDirectory
             )
         }
 
@@ -336,41 +315,17 @@ extension Spawn {
                 workspaceImagePlan = result.plan
                 resolvedToolchain = .base
                 resolvedImage = plan.image
-            } else if let override = toolchain {
-                workspaceImagePlan = nil
-                resolvedToolchain = try Toolchain.parse(override)
-                resolvedImage = try ImageResolver.resolve(
-                    toolchain: resolvedToolchain,
-                    imageOverride: image
-                )
             } else {
                 workspaceImagePlan = nil
-                resolvedToolchain = detection.toolchain ?? .base
-                resolvedImage = try ImageResolver.resolve(
-                    toolchain: resolvedToolchain,
+                let managedImage = try ManagedImagePolicy.resolve(
+                    detection: detection,
+                    toolchainOverride: toolchain,
                     imageOverride: image
                 )
-
-                // Pre-flight: check if image exists locally
-                switch ImageChecker.imageStatus(resolvedImage) {
-                case .present:
-                    break
-                case .missing:
-                    let buildHint =
-                        image != nil
-                        ? "Pull or build the image first."
-                        : "Run 'spawn build \(resolvedToolchain.rawValue)' first."
-                    throw SpawnError.imageNotFound(image: resolvedImage, hint: buildHint)
-                case .unknown:
-                    print("Warning: Unable to verify whether \(resolvedImage) exists from the local container image store. Continuing anyway.")
-                }
-
-                // Warn if toolchain image is older than spawn-base:latest
-                if image == nil, resolvedToolchain != .base,
-                    ImageChecker.isStale(resolvedImage)
-                {
-                    print("Warning: \(resolvedImage) was built before spawn-base:latest.")
-                    print("Run 'spawn build \(resolvedToolchain.rawValue)' to rebuild.")
+                resolvedToolchain = managedImage.toolchain
+                resolvedImage = managedImage.image
+                for warning in managedImage.warnings {
+                    print(warning)
                 }
             }
 

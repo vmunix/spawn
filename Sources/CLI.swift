@@ -1,4 +1,5 @@
 import ArgumentParser
+import Foundation
 
 @main
 struct Spawn: AsyncParsableCommand {
@@ -57,16 +58,17 @@ struct Spawn: AsyncParsableCommand {
               --shell                  Drop into a shell instead of running an agent
               --toolchain <name>       Override toolchain (base/cpp/rust/go/js)
 
-            Bare invocations route to `spawn run`. Use `spawn help run` for launch options.
+            Bare invocations and run-style options route to `spawn run`.
+            Use `spawn -- <command...>` for passthrough workspace commands.
+            Use `spawn help run` for launch options.
             """,
         version: "0.2.0",
-        subcommands: [Run.self, Build.self, Image.self, List.self, Stop.self, Exec.self, Shell.self, Doctor.self],
-        defaultSubcommand: Run.self
+        subcommands: [Run.self, Build.self, Image.self, List.self, Stop.self, Exec.self, Shell.self, Doctor.self]
     )
 
     static func rewrittenArguments(_ arguments: [String]) -> [String] {
         guard let first = arguments.first else {
-            return arguments
+            return ["run"]
         }
 
         if directSubcommands.contains(first) {
@@ -81,11 +83,44 @@ struct Spawn: AsyncParsableCommand {
             return ["run", "--agent", first] + arguments.dropFirst()
         }
 
-        return ["run"] + arguments
+        if first == "--" || first.hasPrefix("-") {
+            return ["run"] + arguments
+        }
+
+        return arguments
+    }
+
+    static func rootRoutingError(
+        for arguments: [String],
+        fileManager: FileManager = .default
+    ) -> ValidationError? {
+        guard let first = arguments.first else {
+            return nil
+        }
+
+        if directSubcommands.contains(first) || rootOnlyFlags.contains(first) || AgentProfile.named(first) != nil {
+            return nil
+        }
+
+        if first == "--" || first.hasPrefix("-") {
+            return nil
+        }
+
+        var isDirectory: ObjCBool = false
+        if fileManager.fileExists(atPath: first, isDirectory: &isDirectory), isDirectory.boolValue {
+            return ValidationError("Workspace paths are selected with -C/--cwd. Example: spawn -C \(first)")
+        }
+
+        return ValidationError(
+            "Unknown subcommand or agent: \(first). Use 'spawn -- <command...>' for workspace commands, or 'spawn help' to list subcommands."
+        )
     }
 
     static func main(_ arguments: [String]?) async {
         let providedArguments = arguments ?? Array(CommandLine.arguments.dropFirst())
+        if let error = rootRoutingError(for: providedArguments) {
+            exit(withError: error)
+        }
         let rewrittenArguments = rewrittenArguments(providedArguments)
 
         do {

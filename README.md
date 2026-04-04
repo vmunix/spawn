@@ -113,6 +113,8 @@ spawn -- <command...>
 spawn doctor [-C <dir>]
 ```
 
+Use `spawn -- <command...>` for passthrough commands. `spawn cargo test` is rejected on purpose so the root CLI stays unambiguous.
+
 | Option | Description |
 |--------|-------------|
 | `--yolo` | Skip permission gates (default: safe mode, prompts before git push) |

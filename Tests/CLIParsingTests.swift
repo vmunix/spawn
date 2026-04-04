@@ -8,6 +8,10 @@ import Testing
     #expect(Spawn.rewrittenArguments(["run", "--", "cargo", "test"]) == ["run", "--", "cargo", "test"])
 }
 
+@Test func rewrittenArgumentsRouteBareInvocationToRun() {
+    #expect(Spawn.rewrittenArguments([]) == ["run"])
+}
+
 @Test func rewrittenArgumentsConvertAgentShortcutIntoRunOption() {
     #expect(Spawn.rewrittenArguments(["codex"]) == ["run", "--agent", "codex"])
     #expect(Spawn.rewrittenArguments(["claude-code", "--verbose"]) == ["run", "--agent", "claude-code", "--verbose"])
@@ -24,6 +28,19 @@ import Testing
     #expect(Spawn.rewrittenArguments(["--version"]) == ["--version"])
 }
 
+@Test func rootRoutingRejectsImplicitWorkspaceCommands() {
+    let error = Spawn.rootRoutingError(for: ["cargo", "test"])
+
+    #expect(error?.message.contains("spawn -- <command...>") == true)
+}
+
+@Test func rootRoutingGuidesWorkspacePathsToCwdFlag() throws {
+    let workspace = try makeTempDir(files: [:])
+    let error = Spawn.rootRoutingError(for: [workspace.path])
+
+    #expect(error?.message.contains("Workspace paths are selected with -C/--cwd") == true)
+}
+
 @Test func runParserAcceptsUppercaseCwdShortOption() throws {
     let command = try Spawn.Run.parseAsRoot(["-C", "/tmp/project", "--shell"])
     guard let parsed = command as? Spawn.Run else {
@@ -36,7 +53,7 @@ import Testing
 }
 
 @Test func rootRoutingDefaultsToRunCommand() throws {
-    let command = try Spawn.parseAsRoot([])
+    let command = try Spawn.parseAsRoot(Spawn.rewrittenArguments([]))
     #expect(command is Spawn.Run)
 }
 

@@ -13,7 +13,8 @@ import Testing
     #expect(help.contains("--runtime workspace-image"))
     #expect(help.contains("Workspace defaults:"))
     #expect(help.contains(".spawn.toml [workspace]   Default agent; access still requires --access"))
-    #expect(help.contains("Bare invocations route to `spawn run`."))
+    #expect(help.contains("Bare invocations and run-style options route to `spawn run`."))
+    #expect(help.contains("Use `spawn -- <command...>` for passthrough workspace commands."))
     #expect(help.contains("spawn help run"))
 }
 

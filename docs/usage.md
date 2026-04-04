@@ -28,6 +28,7 @@ USAGE: spawn run [options] [-- <command...>]
 ```
 
 Use `spawn codex` at the root to switch agents quickly, or `spawn run --agent codex` if you want the explicit subcommand form.
+Use `spawn -- <command...>` for passthrough commands. `spawn cargo test` is rejected on purpose so the root CLI stays unambiguous.
 
 `.spawn.toml` may set the default agent for a workspace. Host access still requires an explicit `--access ...` at launch time.
 
