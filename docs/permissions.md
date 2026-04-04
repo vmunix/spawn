@@ -30,10 +30,25 @@ In safe mode, agents can perform all local operations freely -- file edits, buil
 ## Yolo mode
 
 ```bash
-spawn . --yolo
+spawn --yolo
 ```
 
 All operations run without prompts. The container is still the sandbox boundary -- the agent can't access anything outside the mounted directories.
+
+## Access profiles
+
+Permission mode controls which actions prompt. Access profiles control which host auth material is available inside the container.
+
+- `minimal` (default): workspace, requested mounts, and persisted agent state only
+- `git`: `minimal` plus copied git config and `gh` CLI auth
+- `trusted`: `git` plus selected SSH config and standard `id_*` key material
+
+Use access profiles when you need host identity inside the container:
+
+```bash
+spawn --access git
+spawn --access trusted
+```
 
 ## How it works
 

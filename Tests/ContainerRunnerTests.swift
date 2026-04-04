@@ -131,3 +131,16 @@ import Testing
     // Use a real signed binary that ignores arguments and exits 0
     try ContainerRunner.preflight(containerPath: "/usr/bin/true")
 }
+
+@Test func resolveExecutablePathFindsBinaryViaPATH() throws {
+    let dir = try makeTempDir(files: ["container": "#!/bin/sh\nexit 0\n"])
+    let path = dir.appendingPathComponent("container").path
+    try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: path)
+
+    let resolved = ContainerRunner.resolveExecutablePath(
+        "container",
+        searchPath: dir.path
+    )
+
+    #expect(resolved == path)
+}

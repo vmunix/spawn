@@ -5,6 +5,7 @@ struct DevcontainerConfig: Sendable {
     let toolchain: Toolchain?
     let image: String?
     let dockerfile: String?
+    let buildContext: String?
     let env: [String: String]
 
     /// Returns nil if the file can't be parsed
@@ -20,8 +21,10 @@ struct DevcontainerConfig: Sendable {
 
         // Check for build.dockerfile
         var dockerfile: String? = nil
+        var buildContext: String? = nil
         if let build = json["build"] as? [String: Any] {
             dockerfile = build["dockerfile"] as? String
+            buildContext = build["context"] as? String
         }
 
         // Determine toolchain
@@ -40,6 +43,7 @@ struct DevcontainerConfig: Sendable {
             toolchain: toolchain,
             image: image,
             dockerfile: dockerfile,
+            buildContext: buildContext,
             env: env
         )
     }

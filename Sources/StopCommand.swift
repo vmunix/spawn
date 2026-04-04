@@ -8,6 +8,8 @@ extension Spawn {
             discussion: """
                 Example:
                   spawn stop 3f2b8d4f
+
+                Use a container ID from `spawn list`.
                 """
         )
 

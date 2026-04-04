@@ -2,6 +2,27 @@ import Foundation
 
 /// Invokes Apple's `container` CLI to run, exec, and manage containers.
 enum ContainerRunner: Sendable {
+    static func resolveExecutablePath(
+        _ nameOrPath: String,
+        searchPath: String? = ProcessInfo.processInfo.environment["PATH"]
+    ) -> String? {
+        if nameOrPath.contains("/") {
+            return FileManager.default.isExecutableFile(atPath: nameOrPath) ? nameOrPath : nil
+        }
+
+        guard let searchPath, !searchPath.isEmpty else { return nil }
+        for directory in searchPath.split(separator: ":") {
+            let candidate = URL(fileURLWithPath: String(directory))
+                .appendingPathComponent(nameOrPath)
+                .path
+            if FileManager.default.isExecutableFile(atPath: candidate) {
+                return candidate
+            }
+        }
+
+        return nil
+    }
+
     static let containerPath: String = {
         if let envPath = ProcessInfo.processInfo.environment["CONTAINER_PATH"] {
             logger.debug("Using container path from CONTAINER_PATH: \(envPath)")
@@ -31,16 +52,13 @@ enum ContainerRunner: Sendable {
     /// - Throws: `SpawnError.containerNotFound` if the binary is missing or not executable,
     ///   `SpawnError.runtimeError` if the binary exits non-zero.
     static func preflight(containerPath path: String? = nil) throws {
-        let binary = path ?? containerPath
+        let configuredBinary = path ?? containerPath
 
         // Skip re-checking the default path if it already passed.
         if path == nil, defaultPreflightPassed { return }
 
-        // Phase 1: If the path is absolute, check that it exists and is executable.
-        if binary.contains("/") {
-            guard FileManager.default.isExecutableFile(atPath: binary) else {
-                throw SpawnError.containerNotFound
-            }
+        guard let binary = resolveExecutablePath(configuredBinary) else {
+            throw SpawnError.containerNotFound
         }
 
         // Phase 2: Run `container --version` to verify the runtime responds.
@@ -128,6 +146,7 @@ enum ContainerRunner: Sendable {
         memory: String
     ) throws -> Int32 {
         try preflight()
+        let binary = try resolvedContainerPath()
 
         let args = buildArgs(
             image: image, mounts: mounts, env: env,
@@ -135,17 +154,17 @@ enum ContainerRunner: Sendable {
             cpus: cpus, memory: memory
         )
 
-        let cmd = ([containerPath] + sanitizeForLogging(args)).joined(separator: " ")
+        let cmd = ([binary] + sanitizeForLogging(args)).joined(separator: " ")
         logger.debug("+ \(cmd)")
 
         // When stdin is a TTY, replace our process with `container` via execv.
         // This gives the container CLI direct terminal access (needed for -t flag,
         // raw mode, and proper interactive I/O). No intermediary process.
         if isatty(STDIN_FILENO) != 0 {
-            let cArgs = [containerPath] + args
+            let cArgs = [binary] + args
             let cStrings: [UnsafeMutablePointer<CChar>?] = cArgs.map { strdup($0) }
             let argv = cStrings + [nil]
-            execv(containerPath, argv)
+            execv(binary, argv)
             // execv only returns on failure
             perror("execv")
             return 1
@@ -153,7 +172,7 @@ enum ContainerRunner: Sendable {
 
         // Non-TTY path: use Foundation.Process with signal forwarding
         let process = Process()
-        process.executableURL = URL(fileURLWithPath: containerPath)
+        process.executableURL = URL(fileURLWithPath: binary)
         process.arguments = args
         process.standardInput = FileHandle.standardInput
         process.standardOutput = FileHandle.standardOutput
@@ -210,9 +229,10 @@ enum ContainerRunner: Sendable {
     /// Run a raw command against the container CLI (for exec, list, stop, etc.)
     static func runRaw(args: [String]) throws -> Int32 {
         try preflight()
+        let binary = try resolvedContainerPath()
 
         let process = Process()
-        process.executableURL = URL(fileURLWithPath: containerPath)
+        process.executableURL = URL(fileURLWithPath: binary)
         process.arguments = args
         process.standardInput = FileHandle.standardInput
         process.standardOutput = FileHandle.standardOutput
@@ -225,9 +245,10 @@ enum ContainerRunner: Sendable {
     /// Run a command against the container CLI and capture its stdout.
     static func runCapture(args: [String]) throws -> (status: Int32, output: String) {
         try preflight()
+        let binary = try resolvedContainerPath()
 
         let process = Process()
-        process.executableURL = URL(fileURLWithPath: containerPath)
+        process.executableURL = URL(fileURLWithPath: binary)
         process.arguments = args
         let pipe = Pipe()
         process.standardOutput = pipe
@@ -239,5 +260,12 @@ enum ContainerRunner: Sendable {
 
         let output = String(data: data, encoding: .utf8) ?? ""
         return (process.terminationStatus, output)
+    }
+
+    private static func resolvedContainerPath() throws -> String {
+        guard let binary = resolveExecutablePath(containerPath) else {
+            throw SpawnError.containerNotFound
+        }
+        return binary
     }
 }

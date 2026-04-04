@@ -18,12 +18,12 @@ spawn persists OAuth credentials in `~/.local/state/spawn/<agent>/` on the host 
 To authenticate `gh` inside a container, drop into a shell and run the login flow:
 
 ```bash
-spawn . --shell
+spawn --access git --shell
 # Inside the container:
 gh auth login
 ```
 
-spawn copies your host `~/.config/gh/hosts.yml` and `config.yml` into the container on each run, so if you've already authenticated `gh` on your Mac, it should work automatically.
+If you prefer to reuse host GitHub CLI auth, run with `--access git` or `--access trusted`. Those profiles copy your host `~/.config/gh/hosts.yml` and `config.yml` into the container on each run.
 
 ## API keys
 
@@ -31,14 +31,14 @@ Pass API keys as environment variables:
 
 ```bash
 # Inline
-spawn . --env ANTHROPIC_API_KEY=sk-ant-...
-spawn . --env GH_TOKEN=ghp_...
+spawn --env ANTHROPIC_API_KEY=sk-ant-...
+spawn --env GH_TOKEN=ghp_...
 
 # Multiple variables
-spawn . --env ANTHROPIC_API_KEY=sk-ant-... --env GH_TOKEN=ghp_...
+spawn --env ANTHROPIC_API_KEY=sk-ant-... --env GH_TOKEN=ghp_...
 
 # From an env file
-spawn . --env-file ~/.config/spawn/env
+spawn --env-file ~/.config/spawn/env
 ```
 
 ### Default env file
@@ -70,4 +70,6 @@ CLI `--env` flags override values from the env file.
 | SSH keys | `~/.local/state/spawn/ssh/` | `/home/coder/.ssh/` |
 | gh CLI | `~/.local/state/spawn/gh/` | `/home/coder/.config/gh/` |
 
-These directories are mounted into every container run. Git config and SSH keys are mounted read-only; agent credentials are read-write.
+Agent credential directories are mounted into every container run. Host git config, `gh` auth, and SSH material are only mounted when the selected access profile requires them. Host auth mounts are read-only; agent credentials are read-write.
+
+For `--access trusted`, spawn copies standard SSH config files plus top-level `id_*` key files from `~/.ssh/`. It does not blanket-copy every top-level regular file in that directory.

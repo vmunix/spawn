@@ -9,7 +9,7 @@ nav_order: 3
 
 | Command | Description |
 |---------|-------------|
-| `spawn run` (default) | Run an AI coding agent in a sandboxed container |
+| `spawn run` (default) | Run an AI coding agent or arbitrary command in a sandboxed container |
 | `spawn build` | Build container images |
 | `spawn image list` | List available spawn images |
 | `spawn image rm` | Remove one or more spawn images |
@@ -17,22 +17,20 @@ nav_order: 3
 | `spawn stop` | Stop a running container |
 | `spawn exec` | Execute a command in a running container |
 | `spawn shell` | Open a shell in a running container |
-| `spawn doctor` | Check local images, config, and workspace detection |
+| `spawn doctor` | Check local runtime readiness, images, config, and workspace detection |
 
-`run` is the default subcommand, so `spawn .` is equivalent to `spawn run .`.
+`run` is the default subcommand, so `spawn` is equivalent to `spawn run`.
 
 ## spawn run
 
 ```
-USAGE: spawn run <path> [<agent>] [options]
+USAGE: spawn run [options] [-- <command...>]
 ```
 
-### Arguments
+Use `spawn codex` at the root to switch agents quickly, or `spawn run --agent codex` if you want the explicit subcommand form.
+Use `spawn -- <command...>` for passthrough commands. `spawn cargo test` is rejected on purpose so the root CLI stays unambiguous.
 
-| Argument | Description |
-|----------|-------------|
-| `path` | Directory to mount as workspace (e.g., `.`) |
-| `agent` | Agent to run: `claude-code` (default), `codex` |
+`.spawn.toml` may set the default agent for a workspace. Host access still requires an explicit `--access ...` at launch time.
 
 ### Options
 
@@ -40,7 +38,10 @@ USAGE: spawn run <path> [<agent>] [options]
 |--------|-------------|
 | `--yolo` | Skip permission gates (default: safe mode, prompts before git push) |
 | `--shell` | Drop into shell instead of running agent |
-| `--no-git` | Don't mount git/SSH config into the container |
+| `-C, --cwd <dir>` | Directory to mount as workspace (default: current directory) |
+| `--runtime <name>` | Runtime mode: `auto`, `spawn`, `workspace-image` |
+| `--rebuild-workspace-image` | Force a rebuild when using `--runtime workspace-image` |
+| `--access <name>` | Host access profile: `minimal`, `git`, `trusted` |
 | `--toolchain <name>` | Override auto-detected toolchain: `base`, `cpp`, `rust`, `go`, `js` |
 | `--image <name>` | Override auto-selected container image |
 | `--mount <dir>` | Additional directory to mount (repeatable) |
@@ -51,45 +52,96 @@ USAGE: spawn run <path> [<agent>] [options]
 | `--env-file <path>` | Load environment variables from a file |
 | `--verbose` | Show the container command being run |
 
+To run an arbitrary command instead of an agent, pass it after `--`:
+
+```bash
+spawn -- cargo test
+spawn -C ~/code/project -- swift test
+```
+
+Access profiles control host auth exposure:
+
+- `minimal` mounts only the workspace, requested extra mounts, and persisted agent state
+- `git` additionally mounts git config and `gh` CLI auth
+- `trusted` additionally mounts selected SSH config and standard `id_*` key material copied from `~/.ssh`
+
+Runtime mode controls how spawn handles workspaces that define their own runtime:
+
+- `auto` is the default
+- `spawn` opts into spawn-managed images explicitly
+- `workspace-image` builds and runs the workspace-defined image directly
+
+`workspace-image` reuses a cached workspace image when the tracked Dockerfile, optional `.dockerignore`, devcontainer config, and non-ignored build-context file contents and permissions have not changed.
+Use `--rebuild-workspace-image` with `--runtime workspace-image` when you want to bypass the cache explicitly.
+
+If your repo has a root `Dockerfile` / `Containerfile`, or a `.devcontainer/devcontainer.json` with `build.dockerfile`, use:
+
+```bash
+spawn --runtime workspace-image
+spawn --runtime workspace-image --rebuild-workspace-image
+spawn --runtime spawn
+```
+
 ### Examples
 
 ```bash
-# Run Claude Code with auto-detected toolchain
-spawn .
+# Run Claude Code with auto-detected toolchain in the current directory
+spawn
 
 # Run Codex instead
-spawn . codex
+spawn codex
+
+# Run an arbitrary command in the workspace container
+spawn -- cargo test
+
+# Pick another workspace
+spawn -C ~/code/project
+
+# Build and run the workspace-defined image directly
+spawn --runtime workspace-image
+
+# Force a rebuild of the workspace-defined image
+spawn --runtime workspace-image --rebuild-workspace-image
+
+# Opt into spawn-managed images for a Dockerfile-based workspace
+spawn --runtime spawn
+
+# Opt into git identity and gh auth without exposing SSH keys
+spawn --access git
+
+# Run a command in another workspace
+spawn -C ~/code/project -- swift test
 
 # Full auto mode (no permission prompts)
-spawn . --yolo
+spawn --yolo
 
 # Mount additional directories
-spawn . --mount ~/shared-libs --mount ~/data
+spawn --mount ~/shared-libs --mount ~/data
 
 # Mount a directory read-only
-spawn . --read-only ~/reference-docs
+spawn --read-only ~/reference-docs
 
 # Pass environment variables
-spawn . --env ANTHROPIC_API_KEY=sk-ant-...
+spawn --env ANTHROPIC_API_KEY=sk-ant-...
 
 # Use an env file
-spawn . --env-file ~/.config/spawn/env
+spawn --env-file ~/.config/spawn/env
 
 # Override the auto-detected toolchain
-spawn . --toolchain rust
-spawn . --toolchain js
+spawn --toolchain rust
+spawn --toolchain js
 
 # Override the container image entirely
-spawn . --image my-custom-image:latest
+spawn --image my-custom-image:latest
 
 # Allocate more resources
-spawn . --cpus 8 --memory 16g
+spawn --cpus 8 --memory 16g
 
 # Debug: drop into a shell
-spawn . --shell
+spawn --shell
 
 # See what container command spawn is running
-spawn . --verbose
+spawn --verbose
 ```
 
 ## spawn build
@@ -99,6 +151,7 @@ USAGE: spawn build [<toolchain>] [--cpus <cpus>] [--memory <memory>] [--verbose]
 ```
 
 Build container images. Omit the toolchain to build all images (base is built first automatically since other images depend on it).
+`spawn build` uses an isolated temporary build context, so its behavior does not depend on your current working directory contents.
 
 ```bash
 spawn build            # Build all images
@@ -127,12 +180,20 @@ spawn image rm spawn-rust:latest spawn-go:latest  # Remove images
 
 `spawn image rm` only removes `spawn-*` images and refuses to remove `spawn-base` (since other images depend on it).
 
-## spawn list / stop / exec
+## spawn list / stop / exec / doctor
 
 ```bash
 spawn list              # List running containers
 spawn stop <id>         # Stop a running container
 spawn exec <id> -- ls   # Run a command in a running container
 spawn shell <id>        # Open /bin/bash in a running container
-spawn doctor            # Check local setup and workspace detection
+spawn doctor            # Check local runtime readiness, setup, and workspace detection
+spawn doctor -C ~/code/project
+spawn doctor --json     # Same report in machine-readable form
 ```
+
+`spawn doctor` reports local runtime readiness, the workspace image resolution, and, when `.spawn.toml` is present, the configured workspace values such as `agent` and `access`.
+Use `-C/--cwd` to inspect another workspace without changing directories; a positional path still works for compatibility.
+For workspace-image runtimes it also shows cache state plus the tracked Dockerfile, optional `.dockerignore`, context, config, and cache-record paths.
+It also reports whether the local `container` services are running, whether a default kernel is installed, and whether Rosetta is available on Apple Silicon hosts. When the host is not ready, it points you at the usual first-machine fixes such as `container system start --enable-kernel-install`, `container system kernel set --recommended`, and `softwareupdate --install-rosetta --agree-to-license`.
+`spawn doctor --json` emits a `checks` array together with a structured `workspace` object for automation.

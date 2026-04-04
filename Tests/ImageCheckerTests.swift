@@ -39,6 +39,7 @@ import Testing
     let dir = try makeTempDir(files: [:])
     let exists = ImageChecker.imageExists("spawn-base:latest", storeRoot: dir)
     #expect(exists == false)
+    #expect(ImageChecker.imageStatus("spawn-base:latest", storeRoot: dir) == .unknown)
 }
 
 @Test func returnsFalseForCorruptStateFile() throws {
@@ -47,6 +48,19 @@ import Testing
     ])
     let exists = ImageChecker.imageExists("spawn-base:latest", storeRoot: dir)
     #expect(exists == false)
+    #expect(ImageChecker.imageStatus("spawn-base:latest", storeRoot: dir) == .unknown)
+}
+
+@Test func reportsMissingImageWhenStateLoadsSuccessfully() throws {
+    let dir = try makeTempDir(files: [
+        "state.json": """
+        {
+            "spawn-base:latest": {}
+        }
+        """
+    ])
+
+    #expect(ImageChecker.imageStatus("spawn-rust:latest", storeRoot: dir) == .missing)
 }
 
 @Test func listsAvailableSpawnImagesOnly() throws {

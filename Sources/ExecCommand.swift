@@ -10,6 +10,9 @@ extension Spawn {
                   spawn exec 3f2b8d4f -- ls -la /workspace
                   spawn exec 3f2b8d4f -- /bin/bash
 
+                Use a container ID from `spawn list`. Everything after `--` is passed
+                through as the command to run inside the container.
+
                 Use `spawn shell <id>` as a shortcut for opening `/bin/bash`.
                 """
         )

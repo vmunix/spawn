@@ -17,13 +17,14 @@ import Testing
 @Test func parsesDockerfileField() throws {
     let dir = try makeTempDir(files: [
         "devcontainer.json": """
-        {"build": {"dockerfile": "Dockerfile.dev"}}
+        {"build": {"dockerfile": "Dockerfile.dev", "context": ".."}}
         """
     ])
     let config = DevcontainerConfig.parse(at: dir.appendingPathComponent("devcontainer.json"))
     #expect(config != nil)
     #expect(config?.toolchain == nil)
     #expect(config?.dockerfile == "Dockerfile.dev")
+    #expect(config?.buildContext == "..")
 }
 
 @Test func parsesFeaturesField() throws {

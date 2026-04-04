@@ -2,6 +2,12 @@ import Foundation
 
 /// Pre-flight check against the `container` CLI's local image store.
 enum ImageChecker: Sendable {
+    enum ImageStatus: Sendable, Equatable {
+        case present
+        case missing
+        case unknown
+    }
+
     /// Root of the container CLI's application data.
     /// The `container` CLI stores image state at:
     ///   ~/Library/Application Support/com.apple.container/state.json
@@ -45,13 +51,17 @@ enum ImageChecker: Sendable {
     }
 
     /// Check whether an image reference exists in the container CLI's image store.
-    /// Returns false if the store can't be read (best-effort check).
-    static func imageExists(_ reference: String, storeRoot: URL? = nil) -> Bool {
+    /// Returns `.unknown` if the store can't be read (best-effort check).
+    static func imageStatus(_ reference: String, storeRoot: URL? = nil) -> ImageStatus {
         guard let json = loadState(storeRoot: storeRoot) else {
             logger.warning("Unable to read image store; skipping image existence check")
-            return false
+            return .unknown
         }
-        return json[reference] != nil
+        return json[reference] != nil ? .present : .missing
+    }
+
+    static func imageExists(_ reference: String, storeRoot: URL? = nil) -> Bool {
+        imageStatus(reference, storeRoot: storeRoot) == .present
     }
 
     /// Returns the sorted list of locally available `spawn-*` images.

@@ -118,3 +118,31 @@ import Testing
     let result = ToolchainDetector.inspect(in: dir)
     #expect(result == ToolchainDetector.Inspection(toolchain: nil, source: .dockerfile))
 }
+
+@Test func inspectReportsDevcontainerDockerfileSource() throws {
+    let dir = try makeTempDir(files: [
+        ".devcontainer/devcontainer.json": """
+        {"build": {"dockerfile": "Dockerfile.dev"}}
+        """
+    ])
+    let result = ToolchainDetector.inspect(in: dir)
+    #expect(result == ToolchainDetector.Inspection(toolchain: nil, source: .devcontainerDockerfile))
+}
+
+@Test func loadsWorkspaceDefaultsFromSpawnToml() throws {
+    let dir = try makeTempDir(files: [
+        ".spawn.toml": """
+        [workspace]
+        agent = "codex"
+        access = "git"
+
+        [toolchain]
+        base = "rust"
+        """
+    ])
+
+    let config = ToolchainDetector.loadWorkspaceConfig(in: dir)
+    #expect(config?.agentName == "codex")
+    #expect(config?.accessName == "git")
+    #expect(config?.toolchain == .rust)
+}

@@ -8,6 +8,9 @@ extension Spawn {
             discussion: """
                 Example:
                   spawn list
+
+                Use the reported container IDs with `spawn exec`, `spawn shell`, or
+                `spawn stop`.
                 """
         )
 

@@ -1,27 +1,40 @@
 import Foundation
 
-/// Builds the full mount list for a container run (workspace, git/SSH, agent state).
+/// Builds the full mount list for a container run (workspace, selected host auth, agent state).
 enum MountResolver: Sendable {
     /// Ensure a directory exists, logging a warning on failure.
-    private static func ensureDirectory(_ dir: URL, label: String, using fm: FileManager) {
+    @discardableResult
+    private static func ensureDirectory(_ dir: URL, label: String, using fm: FileManager) -> Bool {
         do {
             try fm.createDirectory(at: dir, withIntermediateDirectories: true)
+            return true
         } catch {
             logger.warning("Failed to create \(label) directory \(dir.path): \(error.localizedDescription)")
+            return false
         }
     }
 
-    /// Resolve all mounts for the given target directory, agent, and options.
-    /// Copies git/SSH configs to the XDG state dir to work around VirtioFS uid issues.
+    private static func shouldCopySSHItem(_ name: String) -> Bool {
+        if ["config", "known_hosts", "known_hosts.old"].contains(name) {
+            return true
+        }
+
+        return name.hasPrefix("id_")
+    }
+
+    /// Resolve all mounts for the given target directory, agent, and access profile.
+    /// Copies selected host auth material to the XDG state dir to work around VirtioFS uid issues.
     static func resolve(
         target: URL,
         additional: [String],
         readOnly: [String],
-        includeGit: Bool,
-        agent: String
+        access: AccessProfile,
+        agent: String,
+        fileManager: FileManager = .default,
+        stateDir: URL = Paths.stateDir,
+        homeDirectory: URL = FileManager.default.homeDirectoryForCurrentUser
     ) -> [Mount] {
-        let fm = FileManager.default
-        let stateDir = Paths.stateDir
+        let fm = fileManager
         var mounts: [Mount] = []
 
         // Primary target
@@ -37,44 +50,52 @@ enum MountResolver: Sendable {
             mounts.append(Mount(hostPath: path, readOnly: true))
         }
 
-        // Git/SSH mounts
+        // Selected host auth mounts
         // VirtioFS preserves host file ownership/permissions, so files owned by the
         // macOS user (uid 501) with 600 permissions are unreadable by the container's
         // coder user (uid 1001). We copy to the XDG state dir where we control
         // permissions, and mount the copies. The Containerfile has symlinks from
         // the expected paths into these mount points.
-        if includeGit {
-            let home = fm.homeDirectoryForCurrentUser
+        let home = homeDirectory
 
+        if access.mountsGitConfig {
             let gitconfig = home.appendingPathComponent(".gitconfig")
             if fm.fileExists(atPath: gitconfig.path) {
                 let gitDir = stateDir.appendingPathComponent("git")
-                ensureDirectory(gitDir, label: "git state", using: fm)
-                let dest = gitDir.appendingPathComponent(".gitconfig")
-                try? fm.removeItem(at: dest)
-                do {
-                    try fm.copyItem(at: gitconfig, to: dest)
-                } catch {
-                    logger.warning("Failed to copy .gitconfig to container state: \(error.localizedDescription)")
+                if ensureDirectory(gitDir, label: "git state", using: fm) {
+                    let dest = gitDir.appendingPathComponent(".gitconfig")
+                    try? fm.removeItem(at: dest)
+                    do {
+                        try fm.copyItem(at: gitconfig, to: dest)
+                        mounts.append(
+                            Mount(
+                                hostPath: gitDir.path,
+                                guestPath: "/home/coder/.gitconfig-dir",
+                                readOnly: true
+                            ))
+                    } catch {
+                        logger.warning("Failed to copy .gitconfig to container state: \(error.localizedDescription)")
+                    }
                 }
-                mounts.append(
-                    Mount(
-                        hostPath: gitDir.path,
-                        guestPath: "/home/coder/.gitconfig-dir",
-                        readOnly: true
-                    ))
             }
 
+        }
+
+        if access.mountsSSHKeys {
             let sshDir = home.appendingPathComponent(".ssh")
             if fm.fileExists(atPath: sshDir.path) {
                 let sshCopy = stateDir.appendingPathComponent("ssh")
                 // Fresh copy each run to pick up key changes.
                 // Copy files individually to skip sockets (SSH agent) and other non-regular files.
                 try? fm.removeItem(at: sshCopy)
+                var copiedAny = false
                 do {
                     try fm.createDirectory(at: sshCopy, withIntermediateDirectories: true)
                     let contents = try fm.contentsOfDirectory(atPath: sshDir.path)
                     for item in contents {
+                        guard shouldCopySSHItem(item) else {
+                            continue
+                        }
                         let src = sshDir.appendingPathComponent(item)
                         var isDir: ObjCBool = false
                         guard fm.fileExists(atPath: src.path, isDirectory: &isDir), !isDir.boolValue else {
@@ -86,6 +107,7 @@ enum MountResolver: Sendable {
                             continue
                         }
                         try fm.copyItem(at: src, to: sshCopy.appendingPathComponent(item))
+                        copiedAny = true
                         // Set restrictive permissions on private key files
                         if !item.hasSuffix(".pub") && item != "known_hosts"
                             && item != "known_hosts.old" && item != "config"
@@ -98,37 +120,50 @@ enum MountResolver: Sendable {
                     }
                 } catch {
                     logger.warning("Failed to copy .ssh files to container state: \(error.localizedDescription)")
+                    copiedAny = false
+                    try? fm.removeItem(at: sshCopy)
                 }
-                mounts.append(
-                    Mount(
-                        hostPath: sshCopy.path,
-                        guestPath: "/home/coder/.ssh",
-                        readOnly: true
-                    ))
+                if copiedAny {
+                    mounts.append(
+                        Mount(
+                            hostPath: sshCopy.path,
+                            guestPath: "/home/coder/.ssh",
+                            readOnly: true
+                        ))
+                }
             }
 
+        }
+
+        if access.mountsGitHubCLIConfig {
             // GitHub CLI auth config (~/.config/gh/) — only copy auth and config files
             let ghDir = home.appendingPathComponent(".config/gh")
             if fm.fileExists(atPath: ghDir.path) {
                 let ghCopy = stateDir.appendingPathComponent("gh")
                 try? fm.removeItem(at: ghCopy)
+                var copiedAny = false
                 do {
                     try fm.createDirectory(at: ghCopy, withIntermediateDirectories: true)
                     for file in ["hosts.yml", "config.yml"] {
                         let src = ghDir.appendingPathComponent(file)
                         if fm.fileExists(atPath: src.path) {
                             try fm.copyItem(at: src, to: ghCopy.appendingPathComponent(file))
+                            copiedAny = true
                         }
                     }
                 } catch {
                     logger.warning("Failed to copy gh config to container state: \(error.localizedDescription)")
+                    copiedAny = false
+                    try? fm.removeItem(at: ghCopy)
                 }
-                mounts.append(
-                    Mount(
-                        hostPath: ghCopy.path,
-                        guestPath: "/home/coder/.config/gh",
-                        readOnly: true
-                    ))
+                if copiedAny {
+                    mounts.append(
+                        Mount(
+                            hostPath: ghCopy.path,
+                            guestPath: "/home/coder/.config/gh",
+                            readOnly: true
+                        ))
+                }
             }
         }
 
