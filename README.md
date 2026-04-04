@@ -124,11 +124,14 @@ Runtime mode controls how spawn reacts when a workspace defines its own runtime:
 
 - `auto` is the default
 - `spawn` opts into spawn-managed images explicitly
-- `workspace-image` is reserved for future support
+- `workspace-image` builds and runs the workspace-defined image directly
+
+`workspace-image` reuses a cached workspace image when the tracked Dockerfile, devcontainer config, and build-context file metadata have not changed.
 
 If your repo has a root `Dockerfile` / `Containerfile`, or a `.devcontainer/devcontainer.json` with `build.dockerfile`, spawn currently requires an explicit choice:
 
 ```bash
+spawn --runtime workspace-image
 spawn --runtime spawn
 ```
 
@@ -212,7 +215,7 @@ If your project already uses `.devcontainer/devcontainer.json`, spawn treats tha
 - the launch summary and `spawn doctor` show when `.devcontainer/devcontainer.json` drove the choice
 - this makes spawn a good fit for projects already set up for VS Code Dev Containers
 
-If `.devcontainer/devcontainer.json` uses `build.dockerfile`, spawn does not yet build and run that workspace image automatically. For now, use `--runtime spawn` to opt into spawn-managed images explicitly.
+If `.devcontainer/devcontainer.json` uses `build.dockerfile`, `spawn --runtime workspace-image` builds and runs that workspace-defined image directly and reuses it until the tracked build inputs change. `spawn --runtime spawn` remains available when you want to ignore the workspace runtime and use spawn-managed images instead.
 
 For JS/TS repos, `spawn-js:latest` bundles Node.js 22 LTS, Corepack, Bun, and Deno so the common runtime and package-manager paths work out of the box.
 

@@ -69,11 +69,14 @@ Runtime mode controls how spawn handles workspaces that define their own runtime
 
 - `auto` is the default
 - `spawn` opts into spawn-managed images explicitly
-- `workspace-image` is reserved for future support
+- `workspace-image` builds and runs the workspace-defined image directly
+
+`workspace-image` reuses a cached workspace image when the tracked Dockerfile, devcontainer config, and build-context file metadata have not changed.
 
 If your repo has a root `Dockerfile` / `Containerfile`, or a `.devcontainer/devcontainer.json` with `build.dockerfile`, use:
 
 ```bash
+spawn --runtime workspace-image
 spawn --runtime spawn
 ```
 
@@ -91,6 +94,9 @@ spawn -- cargo test
 
 # Pick another workspace
 spawn -C ~/code/project
+
+# Build and run the workspace-defined image directly
+spawn --runtime workspace-image
 
 # Opt into spawn-managed images for a Dockerfile-based workspace
 spawn --runtime spawn

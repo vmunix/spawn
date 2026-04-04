@@ -53,11 +53,9 @@ extension Spawn {
             case .spawnToml, .devcontainer:
                 detail = "\(path.path) -> \(image) from \(inspection.source.detail)"
             case .devcontainerDockerfile:
-                detail =
-                    "\(path.path) uses .devcontainer/devcontainer.json with build.dockerfile; pass '--runtime spawn' to use spawn-managed images for now. '--runtime workspace-image' is reserved for future support."
+                detail = workspaceRuntimeDetail(path: path, inspection: inspection)
             case .dockerfile:
-                detail =
-                    "\(path.path) has a Dockerfile/Containerfile; pass '--runtime spawn' to use spawn-managed images for now. '--runtime workspace-image' is reserved for future support."
+                detail = workspaceRuntimeDetail(path: path, inspection: inspection)
             case .cargo, .goMod, .cmake, .bunLock, .denoConfig, .denoLock, .pnpmLock, .yarnLock, .packageLock, .packageJSON, .fallback:
                 detail = "\(path.path) -> \(image) (\(inspection.source.detail))"
             }
@@ -75,6 +73,41 @@ extension Spawn {
             }
 
             return detail
+        }
+
+        private static func workspaceRuntimeDetail(path: URL, inspection: ToolchainDetector.Inspection) -> String {
+            guard let plan = try? WorkspaceImageRuntime.plan(for: path) else {
+                switch inspection.source {
+                case .devcontainerDockerfile:
+                    return "\(path.path) uses .devcontainer/devcontainer.json with build.dockerfile, but spawn could not resolve the workspace-image build inputs."
+                case .dockerfile:
+                    return "\(path.path) has a Dockerfile/Containerfile, but spawn could not resolve the workspace-image build inputs."
+                case .spawnToml, .devcontainer, .cargo, .goMod, .cmake, .bunLock, .denoConfig, .denoLock, .pnpmLock, .yarnLock, .packageLock, .packageJSON, .fallback:
+                    return "\(path.path) defines a workspace runtime, but spawn could not resolve it."
+                }
+            }
+
+            let buildState: String
+            switch WorkspaceImageRuntime.cacheStatus(for: plan) {
+            case .ready:
+                buildState = "cached, up to date"
+            case .notBuilt:
+                buildState = "not built yet"
+            case .stale(let reason):
+                buildState = "rebuild needed: \(reason)"
+            }
+            switch inspection.source {
+            case .devcontainerDockerfile:
+                return
+                    "\(path.path) uses .devcontainer/devcontainer.json with build.dockerfile -> \(plan.image) (\(buildState)). "
+                    + "Use '--runtime workspace-image' to build and run it directly, or '--runtime spawn' to use spawn-managed images."
+            case .dockerfile:
+                return
+                    "\(path.path) has a Dockerfile/Containerfile -> \(plan.image) (\(buildState)). "
+                    + "Use '--runtime workspace-image' to build and run it directly, or '--runtime spawn' to use spawn-managed images."
+            case .spawnToml, .devcontainer, .cargo, .goMod, .cmake, .bunLock, .denoConfig, .denoLock, .pnpmLock, .yarnLock, .packageLock, .packageJSON, .fallback:
+                return "\(path.path) defines a workspace runtime -> \(plan.image) (\(buildState))"
+            }
         }
 
         private static func workspaceCheck(at path: URL) -> Check {

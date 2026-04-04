@@ -28,13 +28,15 @@ import Testing
     #expect(detail == "/Users/me/code/project -> spawn-base:latest (fallback)")
 }
 
-@Test func workspaceDetailExplainsDockerfileRuntimeOptIn() {
+@Test func workspaceDetailExplainsDockerfileRuntimeOptIn() throws {
+    let workspace = try makeTempDir(files: ["Dockerfile": "FROM ubuntu:24.04"])
     let detail = Spawn.Doctor.workspaceDetail(
-        path: fileURL("/Users/me/code/project"),
+        path: workspace,
         inspection: ToolchainDetector.Inspection(toolchain: nil, source: .dockerfile),
         workspaceConfig: nil
     )
 
-    #expect(detail.contains("pass '--runtime spawn'"))
-    #expect(detail.contains("'--runtime workspace-image'"))
+    #expect(detail.contains("Use '--runtime workspace-image'"))
+    #expect(detail.contains("or '--runtime spawn'"))
+    #expect(detail.contains(WorkspaceImageRuntime.imageName(for: workspace)))
 }

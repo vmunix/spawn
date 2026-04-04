@@ -78,7 +78,9 @@ RunCommand.run()
   → SettingsSeeder.seed()         # Seed safe-mode permissions (claude-code only)
   → ToolchainDetector.detect()    # Auto-detect or use override
   → RuntimeMode.parse()           # Decide whether auto/spawn/workspace-image applies
-  → ImageResolver.resolve()       # Map toolchain to image name
+  → WorkspaceImageRuntime.ensureBuilt()
+                                  # Build or reuse a cached workspace image when requested
+  → ImageResolver.resolve()       # Map toolchain to image name for spawn-managed runtimes
   → MountResolver.resolve()       # Build mount list
   → EnvLoader.load/loadDefault()  # Load env vars
   → ContainerRunner.run()         # Launch container

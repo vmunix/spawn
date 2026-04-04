@@ -19,6 +19,41 @@ enum ToolchainDetector: Sendable {
         case packageJSON
         case fallback
 
+        var identifier: String {
+            switch self {
+            case .spawnToml:
+                "spawn-toml"
+            case .devcontainer:
+                "devcontainer"
+            case .devcontainerDockerfile:
+                "devcontainer-dockerfile"
+            case .dockerfile:
+                "dockerfile"
+            case .cargo:
+                "cargo"
+            case .goMod:
+                "go-mod"
+            case .cmake:
+                "cmake"
+            case .bunLock:
+                "bun-lock"
+            case .denoConfig:
+                "deno-config"
+            case .denoLock:
+                "deno-lock"
+            case .pnpmLock:
+                "pnpm-lock"
+            case .yarnLock:
+                "yarn-lock"
+            case .packageLock:
+                "package-lock"
+            case .packageJSON:
+                "package-json"
+            case .fallback:
+                "fallback"
+            }
+        }
+
         var detail: String {
             switch self {
             case .spawnToml:

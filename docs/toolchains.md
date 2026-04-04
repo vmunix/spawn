@@ -88,15 +88,21 @@ spawn --image my-custom-image:latest
 
 ### Workspace-defined runtimes
 
-If a workspace defines its own runtime with a root `Dockerfile` / `Containerfile`, or with `.devcontainer/devcontainer.json` and `build.dockerfile`, spawn does not yet build and run that workspace image automatically.
+If a workspace defines its own runtime with a root `Dockerfile` / `Containerfile`, or with `.devcontainer/devcontainer.json` and `build.dockerfile`, `spawn` keeps `auto` conservative and requires an explicit runtime choice.
 
-For now, opt into spawn-managed images explicitly:
+Build and run the workspace-defined image directly:
+
+```bash
+spawn --runtime workspace-image
+```
+
+Or opt into spawn-managed images explicitly:
 
 ```bash
 spawn --runtime spawn
 ```
 
-`--runtime workspace-image` is reserved for future support.
+When you use `--runtime workspace-image`, spawn stores cache metadata in its state directory and reuses the built image until the tracked Dockerfile, devcontainer config, or build-context file metadata changes.
 
 ## Devcontainer support
 
@@ -104,4 +110,4 @@ spawn reads `.devcontainer/devcontainer.json` and maps the image or features to 
 
 If a viable `.devcontainer/devcontainer.json` is present, spawn prefers it over file-based heuristics. The launch summary and `spawn doctor` output tell you when that config drove the selection.
 
-When a devcontainer uses `build.dockerfile`, spawn treats that as a workspace-defined runtime and requires `--runtime spawn` today.
+When a devcontainer uses `build.dockerfile`, spawn treats that as a workspace-defined runtime. Use `--runtime workspace-image` to build and run it directly with cache reuse, or `--runtime spawn` to ignore it and use spawn-managed images.

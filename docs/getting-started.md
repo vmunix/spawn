@@ -103,7 +103,10 @@ spawn --access git
 If the repo defines its own runtime with a root `Dockerfile` / `Containerfile`, or a devcontainer `build.dockerfile`, spawn currently requires an explicit runtime choice:
 
 ```bash
+spawn --runtime workspace-image
 spawn --runtime spawn
 ```
+
+`spawn --runtime workspace-image` reuses the built workspace image until the tracked build inputs change.
 
 If your project already has a `.devcontainer/devcontainer.json`, spawn uses that as an explicit signal before falling back to file-based heuristics. This makes existing VS Code devcontainer projects work nicely with spawn.

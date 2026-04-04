@@ -107,7 +107,9 @@ extension Spawn {
             memory: String
         ) -> [String] {
             let toolchainDetail: String
-            if toolchainWasOverridden {
+            if runtimeMode == .workspaceImage, detection.toolchain == nil, !toolchainWasOverridden {
+                toolchainDetail = "workspace-image (\(detection.source.detail))"
+            } else if toolchainWasOverridden {
                 toolchainDetail = "\(resolvedToolchain.rawValue) (--toolchain override)"
             } else {
                 toolchainDetail = "\(resolvedToolchain.rawValue) (\(detection.source.detail))"
@@ -152,11 +154,11 @@ extension Spawn {
             switch source {
             case .dockerfile:
                 return .runtimeError(
-                    "This workspace defines a Dockerfile/Containerfile. Pass '--runtime spawn' to use spawn-managed images for now. '--runtime workspace-image' is reserved for future support."
+                    "This workspace defines a Dockerfile/Containerfile. Pass '--runtime workspace-image' to build and run it directly, or '--runtime spawn' to use spawn-managed images."
                 )
             case .devcontainerDockerfile:
                 return .runtimeError(
-                    "This workspace uses .devcontainer/devcontainer.json with build.dockerfile. Pass '--runtime spawn' to use spawn-managed images for now. '--runtime workspace-image' is reserved for future support."
+                    "This workspace uses .devcontainer/devcontainer.json with build.dockerfile. Pass '--runtime workspace-image' to build and run it directly, or '--runtime spawn' to use spawn-managed images."
                 )
             case .spawnToml, .devcontainer, .cargo, .goMod, .cmake, .bunLock, .denoConfig, .denoLock, .pnpmLock, .yarnLock, .packageLock, .packageJSON, .fallback:
                 return .runtimeError("Runtime selection error")
@@ -228,22 +230,58 @@ extension Spawn {
             let resolvedAccess = access ?? workspaceConfig?.accessName ?? AccessProfile.minimal.rawValue
             let accessProfile = try AccessProfile.parse(resolvedAccess)
             let runtimeMode = try RuntimeMode.parse(runtime)
+            if runtimeMode == .workspaceImage, toolchain != nil {
+                throw ValidationError("Use either '--runtime workspace-image' or '--toolchain', not both.")
+            }
+            if runtimeMode == .workspaceImage, image != nil {
+                throw ValidationError("Use either '--runtime workspace-image' or '--image', not both.")
+            }
 
             // Resolve toolchain
             let detection = ToolchainDetector.inspect(in: path)
-            if runtimeMode == .workspaceImage {
-                throw SpawnError.runtimeError(
-                    "Workspace-image runtime is not implemented yet. For now use '--runtime spawn' to run with spawn-managed images."
-                )
-            }
             if runtimeMode == .auto, Self.requiresExplicitRuntimeSelection(for: detection.source) {
                 throw Self.runtimeSelectionError(for: detection.source)
             }
             let resolvedToolchain: Toolchain
-            if let override = toolchain {
+            let resolvedImage: String
+            let workspaceImagePlan: WorkspaceImageRuntime.Plan?
+            if runtimeMode == .workspaceImage {
+                let plan = try WorkspaceImageRuntime.plan(for: path)
+                let result = try WorkspaceImageRuntime.ensureBuilt(plan: plan, cpus: cpus, memory: memory)
+                workspaceImagePlan = result.plan
+                resolvedToolchain = .base
+                resolvedImage = plan.image
+            } else if let override = toolchain {
+                workspaceImagePlan = nil
                 resolvedToolchain = try Toolchain.parse(override)
+                resolvedImage = try ImageResolver.resolve(
+                    toolchain: resolvedToolchain,
+                    imageOverride: image
+                )
             } else {
+                workspaceImagePlan = nil
                 resolvedToolchain = detection.toolchain ?? .base
+                resolvedImage = try ImageResolver.resolve(
+                    toolchain: resolvedToolchain,
+                    imageOverride: image
+                )
+
+                // Pre-flight: check if image exists locally
+                if !ImageChecker.imageExists(resolvedImage) {
+                    let buildHint =
+                        image != nil
+                        ? "Pull or build the image first."
+                        : "Run 'spawn build \(resolvedToolchain.rawValue)' first."
+                    throw SpawnError.imageNotFound(image: resolvedImage, hint: buildHint)
+                }
+
+                // Warn if toolchain image is older than spawn-base:latest
+                if image == nil, resolvedToolchain != .base,
+                    ImageChecker.isStale(resolvedImage)
+                {
+                    print("Warning: \(resolvedImage) was built before spawn-base:latest.")
+                    print("Run 'spawn build \(resolvedToolchain.rawValue)' to rebuild.")
+                }
             }
 
             // Seed Claude Code safe-mode permissions
@@ -251,29 +289,6 @@ extension Spawn {
                 let claudeSettingsDir = Paths.stateDir.appendingPathComponent(agent)
                     .appendingPathComponent("claude")
                 SettingsSeeder.seed(settingsDir: claudeSettingsDir)
-            }
-
-            // Resolve image
-            let resolvedImage = try ImageResolver.resolve(
-                toolchain: resolvedToolchain,
-                imageOverride: image
-            )
-
-            // Pre-flight: check if image exists locally
-            if !ImageChecker.imageExists(resolvedImage) {
-                let buildHint =
-                    image != nil
-                    ? "Pull or build the image first."
-                    : "Run 'spawn build \(resolvedToolchain.rawValue)' first."
-                throw SpawnError.imageNotFound(image: resolvedImage, hint: buildHint)
-            }
-
-            // Warn if toolchain image is older than spawn-base:latest
-            if image == nil, resolvedToolchain != .base,
-                ImageChecker.isStale(resolvedImage)
-            {
-                print("Warning: \(resolvedImage) was built before spawn-base:latest.")
-                print("Run 'spawn build \(resolvedToolchain.rawValue)' to rebuild.")
             }
 
             // Resolve mounts
@@ -291,6 +306,10 @@ extension Spawn {
                 environment = try EnvLoader.load(from: envFile)
             } else {
                 environment = EnvLoader.loadDefault()
+            }
+
+            for (key, value) in workspaceImagePlan?.env ?? [:] {
+                environment[key] = value
             }
 
             // CLI --env overrides

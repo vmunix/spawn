@@ -69,7 +69,7 @@ Today the default command is still `spawn <path> [agent] [options]`, which keeps
 
 ### Dockerfile behavior drift
 
-The code and docs historically disagreed about what a workspace-local `Dockerfile` or `Containerfile` means. The short-term fix is to stop guessing: `auto` now refuses to proceed for workspace-defined runtimes and requires explicit `--runtime spawn` until true workspace-image support exists.
+The code and docs historically disagreed about what a workspace-local `Dockerfile` or `Containerfile` means. That seam is now split cleanly: `auto` still refuses to guess for workspace-defined runtimes, `--runtime spawn` opts into spawn-managed images, and `--runtime workspace-image` builds and runs the workspace-defined image directly.
 
 ### Access model
 
@@ -228,9 +228,9 @@ This phase changes real security posture and should include clear docs and migra
 ### Changes
 
 - short term: make `auto` refuse to guess for workspace-defined runtimes and require an explicit `--runtime spawn` opt-in
-- short term: reserve `--runtime workspace-image` as the future direct-build/runtime path
+- add explicit `--runtime workspace-image` support for direct build/run behavior
 - treat `.devcontainer/devcontainer.json` with `build.dockerfile` the same way as a root `Dockerfile` / `Containerfile`
-- long term: implement true workspace-image build/run support
+- long term: optimize workspace-image caching, rebuild policy, and diagnostics now that direct build/run support exists
 - update `doctor` to explain the exact resolution path
 
 ### Notes
