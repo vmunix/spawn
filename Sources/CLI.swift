@@ -62,7 +62,7 @@ struct Spawn: AsyncParsableCommand {
             Use `spawn -- <command...>` for passthrough workspace commands.
             Use `spawn help run` for launch options.
             """,
-        version: "0.2.0",
+        version: "0.2.1",
         subcommands: [Run.self, Build.self, Image.self, List.self, Stop.self, Exec.self, Shell.self, Doctor.self]
     )
 
