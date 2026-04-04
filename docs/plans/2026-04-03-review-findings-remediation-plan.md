@@ -132,12 +132,12 @@ This is mostly an architecture/correctness cleanup, but it will also make behavi
 
 ### Checklist
 
-- [ ] Revisit the open-ended root rewrite behavior in `CLI.swift`
-- [ ] Decide whether bare root rewriting should be limited to known agent shortcuts and obvious workspace-first forms only
-- [ ] Extract launch-resolution policy out of `RunCommand`
-- [ ] Extract image-availability policy out of `RunCommand`
-- [ ] Extract summary rendering and runtime policy into narrower helpers/types
-- [ ] Keep the workspace-first UX intact while making parser behavior less surprising
+- [x] Revisit the open-ended root rewrite behavior in `CLI.swift`
+- [x] Decide whether bare root rewriting should be limited to known agent shortcuts and obvious workspace-first forms only
+- [x] Extract launch-resolution policy out of `RunCommand`
+- [x] Extract image-availability policy out of `RunCommand`
+- [x] Extract summary rendering and runtime policy into narrower helpers/types
+- [x] Keep the workspace-first UX intact while making parser behavior less surprising
 
 ### Notes
 

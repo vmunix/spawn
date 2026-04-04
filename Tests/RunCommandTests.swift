@@ -59,7 +59,7 @@ import Testing
     )
 
     #expect(
-        Spawn.Run.effectiveAccessName(
+        RunRuntimePolicy.effectiveAccessName(
             accessOverride: nil,
             workspaceConfig: workspaceConfig
         ) == AccessProfile.minimal.rawValue
@@ -74,7 +74,7 @@ import Testing
     )
 
     #expect(
-        Spawn.Run.effectiveAccessName(
+        RunRuntimePolicy.effectiveAccessName(
             accessOverride: "git",
             workspaceConfig: workspaceConfig
         ) == AccessProfile.git.rawValue
@@ -119,14 +119,14 @@ import Testing
 }
 
 @Test func dockerfileSourcesRequireExplicitRuntimeSelection() {
-    #expect(Spawn.Run.requiresExplicitRuntimeSelection(for: .dockerfile) == true)
-    #expect(Spawn.Run.requiresExplicitRuntimeSelection(for: .devcontainerDockerfile) == true)
-    #expect(Spawn.Run.requiresExplicitRuntimeSelection(for: .cargo) == false)
+    #expect(RunRuntimePolicy.requiresExplicitRuntimeSelection(for: .dockerfile) == true)
+    #expect(RunRuntimePolicy.requiresExplicitRuntimeSelection(for: .devcontainerDockerfile) == true)
+    #expect(RunRuntimePolicy.requiresExplicitRuntimeSelection(for: .cargo) == false)
 }
 
 @Test func rebuildWorkspaceImageFlagRequiresWorkspaceImageRuntime() {
     #expect(throws: ValidationError.self) {
-        try Spawn.Run.validateRuntimeOptions(
+        try RunRuntimePolicy.validateOptions(
             runtimeMode: .spawn,
             image: nil,
             toolchain: nil,
@@ -137,7 +137,7 @@ import Testing
 
 @Test func workspaceImageRuntimeRejectsToolchainAndImageOverrides() {
     #expect(throws: ValidationError.self) {
-        try Spawn.Run.validateRuntimeOptions(
+        try RunRuntimePolicy.validateOptions(
             runtimeMode: .workspaceImage,
             image: nil,
             toolchain: "rust",
@@ -146,7 +146,7 @@ import Testing
     }
 
     #expect(throws: ValidationError.self) {
-        try Spawn.Run.validateRuntimeOptions(
+        try RunRuntimePolicy.validateOptions(
             runtimeMode: .workspaceImage,
             image: "custom:latest",
             toolchain: nil,
@@ -157,7 +157,7 @@ import Testing
 
 @Test func launchSummaryIncludesCoreContext() {
     let workspace = URL(fileURLWithPath: "/Users/me/code/project")
-    let lines = Spawn.Run.launchSummaryLines(
+    let lines = RunLaunchSummary.lines(
         workspace: workspace,
         agent: "codex",
         shell: false,
@@ -190,7 +190,7 @@ import Testing
 
 @Test func launchSummaryMarksShellSessions() {
     let workspace = URL(fileURLWithPath: "/Users/me/code/project")
-    let lines = Spawn.Run.launchSummaryLines(
+    let lines = RunLaunchSummary.lines(
         workspace: workspace,
         agent: "claude-code",
         shell: true,
@@ -217,7 +217,7 @@ import Testing
 
 @Test func launchSummaryMarksPassthroughCommands() {
     let workspace = URL(fileURLWithPath: "/Users/me/code/project")
-    let lines = Spawn.Run.launchSummaryLines(
+    let lines = RunLaunchSummary.lines(
         workspace: workspace,
         agent: "claude-code",
         shell: false,
@@ -241,7 +241,7 @@ import Testing
 
 @Test func launchSummarySummarizesCommandWithoutEchoingArguments() {
     let workspace = URL(fileURLWithPath: "/Users/me/code/project")
-    let lines = Spawn.Run.launchSummaryLines(
+    let lines = RunLaunchSummary.lines(
         workspace: workspace,
         agent: "claude-code",
         shell: false,
@@ -271,7 +271,7 @@ import Testing
 
 @Test func launchSummaryIncludesSpecificJavaScriptDetectionReason() {
     let workspace = URL(fileURLWithPath: "/Users/me/code/project")
-    let lines = Spawn.Run.launchSummaryLines(
+    let lines = RunLaunchSummary.lines(
         workspace: workspace,
         agent: "claude-code",
         shell: false,
@@ -295,7 +295,7 @@ import Testing
 
 @Test func launchSummaryMarksToolchainOverrides() {
     let workspace = URL(fileURLWithPath: "/Users/me/code/project")
-    let lines = Spawn.Run.launchSummaryLines(
+    let lines = RunLaunchSummary.lines(
         workspace: workspace,
         agent: "claude-code",
         shell: false,

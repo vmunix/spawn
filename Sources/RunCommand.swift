@@ -97,77 +97,6 @@ extension Spawn {
             return command
         }
 
-        private static func summarizedCommand(_ command: [String]) -> String {
-            guard let executable = command.first else {
-                return "<unknown>"
-            }
-
-            let argumentCount = command.count - 1
-            switch argumentCount {
-            case ..<1:
-                return executable
-            case 1:
-                return "\(executable), 1 arg"
-            default:
-                return "\(executable), \(argumentCount) args"
-            }
-        }
-
-        private static func sessionDescription(shell: Bool, command: [String]) -> String {
-            if shell {
-                return "shell (/bin/bash)"
-            }
-
-            if !command.isEmpty {
-                return "command (\(summarizedCommand(command)))"
-            }
-
-            return "agent entrypoint"
-        }
-
-        static func launchSummaryLines(
-            workspace: URL,
-            agent: String,
-            shell: Bool,
-            command: [String],
-            yolo: Bool,
-            runtimeMode: RuntimeMode,
-            toolchainWasOverridden: Bool,
-            detection: ToolchainDetector.Inspection,
-            resolvedToolchain: Toolchain,
-            image: String,
-            accessProfile: AccessProfile,
-            extraMountCount: Int,
-            readOnlyMountCount: Int,
-            envCount: Int,
-            cpus: Int,
-            memory: String
-        ) -> [String] {
-            let toolchainDetail: String
-            if runtimeMode == .workspaceImage, detection.toolchain == nil, !toolchainWasOverridden {
-                toolchainDetail = "workspace-image (\(detection.source.detail))"
-            } else if toolchainWasOverridden {
-                toolchainDetail = "\(resolvedToolchain.rawValue) (--toolchain override)"
-            } else {
-                toolchainDetail = "\(resolvedToolchain.rawValue) (\(detection.source.detail))"
-            }
-
-            return [
-                "Launch summary:",
-                "  workspace: \(workspace.path)",
-                "  agent: \(agent)",
-                "  session: \(sessionDescription(shell: shell, command: command))",
-                yolo ? "  mode: yolo" : "  mode: safe",
-                "  runtime: \(runtimeMode.rawValue)",
-                "  access: \(accessProfile.rawValue)",
-                "  toolchain: \(toolchainDetail)",
-                "  image: \(image)",
-                "  extra mounts: \(extraMountCount) read-write, \(readOnlyMountCount) read-only",
-                "  environment: \(envCount) variable\(envCount == 1 ? "" : "s")",
-                "  resources: \(cpus) CPU, \(memory) memory",
-            ]
-        }
-
         private static func validateDirectory(at path: String, label: String) throws {
             var isDir: ObjCBool = false
             guard FileManager.default.fileExists(atPath: path, isDirectory: &isDir) else {
@@ -176,62 +105,6 @@ extension Spawn {
             guard isDir.boolValue else {
                 throw ValidationError("\(label) is not a directory: \(path)")
             }
-        }
-
-        static func requiresExplicitRuntimeSelection(for source: ToolchainDetector.Source) -> Bool {
-            switch source {
-            case .dockerfile, .devcontainerDockerfile:
-                true
-            case .spawnToml, .devcontainer, .cargo, .goMod, .cmake, .bunLock, .denoConfig, .denoLock, .pnpmLock, .yarnLock, .packageLock, .packageJSON, .fallback:
-                false
-            }
-        }
-
-        static func runtimeSelectionError(for source: ToolchainDetector.Source) -> SpawnError {
-            switch source {
-            case .dockerfile:
-                return .runtimeError(
-                    "This workspace defines a Dockerfile/Containerfile. Pass '--runtime workspace-image' to build and run it directly, or '--runtime spawn' to use spawn-managed images."
-                )
-            case .devcontainerDockerfile:
-                return .runtimeError(
-                    "This workspace uses .devcontainer/devcontainer.json with build.dockerfile. Pass '--runtime workspace-image' to build and run it directly, or '--runtime spawn' to use spawn-managed images."
-                )
-            case .spawnToml, .devcontainer, .cargo, .goMod, .cmake, .bunLock, .denoConfig, .denoLock, .pnpmLock, .yarnLock, .packageLock, .packageJSON, .fallback:
-                return .runtimeError("Runtime selection error")
-            }
-        }
-
-        static func validateRuntimeOptions(
-            runtimeMode: RuntimeMode,
-            image: String?,
-            toolchain: String?,
-            rebuildWorkspaceImage: Bool
-        ) throws {
-            if rebuildWorkspaceImage, runtimeMode != .workspaceImage {
-                throw ValidationError("'--rebuild-workspace-image' requires '--runtime workspace-image'.")
-            }
-            if runtimeMode == .workspaceImage, toolchain != nil {
-                throw ValidationError("Use either '--runtime workspace-image' or '--toolchain', not both.")
-            }
-            if runtimeMode == .workspaceImage, image != nil {
-                throw ValidationError("Use either '--runtime workspace-image' or '--image', not both.")
-            }
-        }
-
-        static func effectiveAccessName(
-            accessOverride: String?,
-            workspaceConfig: WorkspaceConfig?
-        ) -> String {
-            if let accessOverride {
-                return accessOverride
-            }
-
-            if workspaceConfig?.accessProfile == .minimal {
-                return AccessProfile.minimal.rawValue
-            }
-
-            return AccessProfile.minimal.rawValue
         }
 
         static func resolveLaunchRequest(
@@ -280,7 +153,7 @@ extension Spawn {
             guard let profile = AgentProfile.named(agent) else {
                 throw ValidationError("Unknown agent: \(agent). Use 'claude-code' or 'codex'.")
             }
-            let resolvedAccess = Self.effectiveAccessName(
+            let resolvedAccess = RunRuntimePolicy.effectiveAccessName(
                 accessOverride: access,
                 workspaceConfig: workspaceConfig
             )
@@ -289,7 +162,7 @@ extension Spawn {
                 print("Warning: ignoring .spawn.toml access=\(configuredAccess.rawValue). Pass '--access \(configuredAccess.rawValue)' explicitly to opt into host auth exposure.")
             }
             let runtimeMode = try RuntimeMode.parse(runtime)
-            try Self.validateRuntimeOptions(
+            try RunRuntimePolicy.validateOptions(
                 runtimeMode: runtimeMode,
                 image: image,
                 toolchain: toolchain,
@@ -298,8 +171,8 @@ extension Spawn {
 
             // Resolve toolchain
             let detection = ToolchainDetector.inspect(in: path)
-            if runtimeMode == .auto, Self.requiresExplicitRuntimeSelection(for: detection.source) {
-                throw Self.runtimeSelectionError(for: detection.source)
+            if runtimeMode == .auto, RunRuntimePolicy.requiresExplicitRuntimeSelection(for: detection.source) {
+                throw RunRuntimePolicy.runtimeSelectionError(for: detection.source)
             }
             let resolvedToolchain: Toolchain
             let resolvedImage: String
@@ -387,7 +260,7 @@ extension Spawn {
             // Working directory — derived from the primary mount's guest path
             let workdir = resolvedMounts[0].guestPath
 
-            let summaryLines = Self.launchSummaryLines(
+            let summaryLines = RunLaunchSummary.lines(
                 workspace: path,
                 agent: agent,
                 shell: shell,
