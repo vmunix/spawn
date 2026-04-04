@@ -1,0 +1,6 @@
+[workspace]
+agent = "codex"
+access = "minimal"
+
+[toolchain]
+base = "rust"

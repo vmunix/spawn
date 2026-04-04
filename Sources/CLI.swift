@@ -2,6 +2,24 @@ import ArgumentParser
 
 @main
 struct Spawn: AsyncParsableCommand {
+    private static let directSubcommands: Set<String> = [
+        "run",
+        "build",
+        "image",
+        "list",
+        "stop",
+        "exec",
+        "shell",
+        "doctor",
+        "help",
+    ]
+
+    private static let rootOnlyFlags: Set<String> = [
+        "-h",
+        "--help",
+        "--version",
+    ]
+
     static let configuration = CommandConfiguration(
         commandName: "spawn",
         abstract: "Workspace-first agent and command containers on macOS.",
@@ -45,4 +63,44 @@ struct Spawn: AsyncParsableCommand {
         subcommands: [Run.self, Build.self, Image.self, List.self, Stop.self, Exec.self, Shell.self, Doctor.self],
         defaultSubcommand: Run.self
     )
+
+    static func rewrittenArguments(_ arguments: [String]) -> [String] {
+        guard let first = arguments.first else {
+            return arguments
+        }
+
+        if directSubcommands.contains(first) {
+            return arguments
+        }
+
+        if rootOnlyFlags.contains(first) {
+            return arguments
+        }
+
+        if AgentProfile.named(first) != nil {
+            return ["run", "--agent", first] + arguments.dropFirst()
+        }
+
+        return ["run"] + arguments
+    }
+
+    static func main(_ arguments: [String]?) async {
+        let providedArguments = arguments ?? Array(CommandLine.arguments.dropFirst())
+        let rewrittenArguments = rewrittenArguments(providedArguments)
+
+        do {
+            var command = try parseAsRoot(rewrittenArguments)
+            if var asyncCommand = command as? AsyncParsableCommand {
+                try await asyncCommand.run()
+            } else {
+                try command.run()
+            }
+        } catch {
+            exit(withError: error)
+        }
+    }
+
+    static func main() async {
+        await main(nil)
+    }
 }

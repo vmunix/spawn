@@ -209,6 +209,11 @@ import Testing
     #expect(lines.contains("  session: command (cargo test)"))
 }
 
+@Test func normalizedCommandDropsLeadingSeparator() {
+    #expect(Spawn.Run.normalizedCommand(["--", "cargo", "test"]) == ["cargo", "test"])
+    #expect(Spawn.Run.normalizedCommand(["cargo", "test"]) == ["cargo", "test"])
+}
+
 @Test func launchSummaryIncludesSpecificJavaScriptDetectionReason() {
     let workspace = URL(fileURLWithPath: "/Users/me/code/project")
     let lines = Spawn.Run.launchSummaryLines(

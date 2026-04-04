@@ -31,7 +31,7 @@ make build                               # Release build
 make test                                # Lint + full test suite
 make lint                                # swift-format lint
 make format                              # Auto-format in place
-make smoke                               # End-to-end fixture runs in containers
+make smoke                               # End-to-end workspace-first and workspace-image coverage
 make install                             # Install to ~/.local/bin
 ```
 
@@ -131,7 +131,7 @@ Tests use Swift 6's `Testing` framework, not XCTest.
 - Use `@Test` and `#expect`
 - `Tests/TestHelpers.swift` provides `makeTempDir(files:)`
 - `make test` prefers Xcode when available because CLT Swift can be incomplete for this setup
-- `make smoke` exercises the fixture workspaces under `fixtures/`
+- `make smoke` exercises the front-door CLI across the fixture workspaces under `fixtures/`, including `doctor --json` and workspace-image runtimes
 
 Favor pure-function tests when possible:
 

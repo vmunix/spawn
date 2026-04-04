@@ -43,13 +43,13 @@ extension Spawn {
                 """
         )
 
-        @Argument(help: "Agent to run: claude-code, codex.")
+        @Option(name: .long, help: "Agent to run: claude-code, codex.")
         var agent: String?
 
         @Argument(parsing: .captureForPassthrough, help: "Command to run inside the workspace container after '--'.")
         var command: [String] = []
 
-        @Option(name: [.short, .long], help: "Directory to mount as workspace (default: current directory).")
+        @Option(name: [.customShort("C"), .long], help: "Directory to mount as workspace (default: current directory).")
         var cwd: String?
 
         @Option(name: .long, help: "Additional directory to mount (repeatable).")
@@ -93,6 +93,13 @@ extension Spawn {
 
         @Flag(name: .long, help: "Skip permission gates (default: safe mode, prompts before git push).")
         var yolo: Bool = false
+
+        static func normalizedCommand(_ command: [String]) -> [String] {
+            if command.first == "--" {
+                return Array(command.dropFirst())
+            }
+            return command
+        }
 
         private static func sessionDescription(shell: Bool, command: [String]) -> String {
             if shell {
@@ -231,6 +238,7 @@ extension Spawn {
 
         mutating func run() async throws {
             if verbose { logger.logLevel = .debug }
+            command = Self.normalizedCommand(command)
 
             if shell, !command.isEmpty {
                 throw ValidationError("Use either --shell or '-- <command...>', not both.")
