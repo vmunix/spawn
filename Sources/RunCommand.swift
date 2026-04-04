@@ -31,7 +31,7 @@ extension Spawn {
                   --rebuild-workspace-image      Ignore cache for workspace-image runs
 
                 Workspace defaults:
-                  .spawn.toml [workspace]        Default agent and access profile
+                  .spawn.toml [workspace]        Default agent; access still requires --access
                   .spawn.toml [toolchain]        Default spawn-managed toolchain base
 
                 Other useful forms:
@@ -101,13 +101,29 @@ extension Spawn {
             return command
         }
 
+        private static func summarizedCommand(_ command: [String]) -> String {
+            guard let executable = command.first else {
+                return "<unknown>"
+            }
+
+            let argumentCount = command.count - 1
+            switch argumentCount {
+            case ..<1:
+                return executable
+            case 1:
+                return "\(executable), 1 arg"
+            default:
+                return "\(executable), \(argumentCount) args"
+            }
+        }
+
         private static func sessionDescription(shell: Bool, command: [String]) -> String {
             if shell {
                 return "shell (/bin/bash)"
             }
 
             if !command.isEmpty {
-                return "command (\(command.joined(separator: " ")))"
+                return "command (\(summarizedCommand(command)))"
             }
 
             return "agent entrypoint"
@@ -207,6 +223,21 @@ extension Spawn {
             }
         }
 
+        static func effectiveAccessName(
+            accessOverride: String?,
+            workspaceConfig: WorkspaceConfig?
+        ) -> String {
+            if let accessOverride {
+                return accessOverride
+            }
+
+            if workspaceConfig?.accessProfile == .minimal {
+                return AccessProfile.minimal.rawValue
+            }
+
+            return AccessProfile.minimal.rawValue
+        }
+
         static func resolveLaunchRequest(
             agent: String?,
             cwdOverride: String?,
@@ -270,8 +301,14 @@ extension Spawn {
             guard let profile = AgentProfile.named(agent) else {
                 throw ValidationError("Unknown agent: \(agent). Use 'claude-code' or 'codex'.")
             }
-            let resolvedAccess = access ?? workspaceConfig?.accessName ?? AccessProfile.minimal.rawValue
+            let resolvedAccess = Self.effectiveAccessName(
+                accessOverride: access,
+                workspaceConfig: workspaceConfig
+            )
             let accessProfile = try AccessProfile.parse(resolvedAccess)
+            if access == nil, let configuredAccess = workspaceConfig?.accessProfile, configuredAccess != .minimal {
+                print("Warning: ignoring .spawn.toml access=\(configuredAccess.rawValue). Pass '--access \(configuredAccess.rawValue)' explicitly to opt into host auth exposure.")
+            }
             let runtimeMode = try RuntimeMode.parse(runtime)
             try Self.validateRuntimeOptions(
                 runtimeMode: runtimeMode,
@@ -315,12 +352,17 @@ extension Spawn {
                 )
 
                 // Pre-flight: check if image exists locally
-                if !ImageChecker.imageExists(resolvedImage) {
+                switch ImageChecker.imageStatus(resolvedImage) {
+                case .present:
+                    break
+                case .missing:
                     let buildHint =
                         image != nil
                         ? "Pull or build the image first."
                         : "Run 'spawn build \(resolvedToolchain.rawValue)' first."
                     throw SpawnError.imageNotFound(image: resolvedImage, hint: buildHint)
+                case .unknown:
+                    print("Warning: Unable to verify whether \(resolvedImage) exists from the local container image store. Continuing anyway.")
                 }
 
                 // Warn if toolchain image is older than spawn-base:latest

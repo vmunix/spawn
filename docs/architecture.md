@@ -112,8 +112,8 @@ Host auth exposure is controlled by `AccessProfile`:
 
 - `minimal` mounts no host git, `gh`, or SSH material
 - `git` mounts copied git config and `gh` CLI auth
-- `trusted` mounts copied git config, `gh` CLI auth, and SSH material
+- `trusted` mounts copied git config, `gh` CLI auth, and selected SSH material
 
 ### SSH key handling
 
-When the `trusted` access profile is selected, SSH keys are copied (not mounted directly) to the state directory. Symlinks are filtered out to prevent exfiltrating files outside `~/.ssh/`. Private keys get `0600` permissions on the copies.
+When the `trusted` access profile is selected, spawn copies standard SSH config files and top-level `id_*` key material (not mounted directly) to the state directory. Symlinks are filtered out to prevent exfiltrating files outside `~/.ssh/`. Private keys get `0600` permissions on the copies.

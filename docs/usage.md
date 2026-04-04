@@ -24,14 +24,12 @@ nav_order: 3
 ## spawn run
 
 ```
-USAGE: spawn run [<agent>] [options]
+USAGE: spawn run [options] [-- <command...>]
 ```
 
-### Arguments
+Use `spawn codex` at the root to switch agents quickly, or `spawn run --agent codex` if you want the explicit subcommand form.
 
-| Argument | Description |
-|----------|-------------|
-| `agent` | Optional agent to run: `claude-code` (default), `codex` |
+`.spawn.toml` may set the default agent for a workspace. Host access still requires an explicit `--access ...` at launch time.
 
 ### Options
 
@@ -64,7 +62,7 @@ Access profiles control host auth exposure:
 
 - `minimal` mounts only the workspace, requested extra mounts, and persisted agent state
 - `git` additionally mounts git config and `gh` CLI auth
-- `trusted` additionally mounts copied SSH material
+- `trusted` additionally mounts selected SSH config and standard `id_*` key material copied from `~/.ssh`
 
 Runtime mode controls how spawn handles workspaces that define their own runtime:
 
@@ -180,7 +178,7 @@ spawn image rm spawn-rust:latest spawn-go:latest  # Remove images
 
 `spawn image rm` only removes `spawn-*` images and refuses to remove `spawn-base` (since other images depend on it).
 
-## spawn list / stop / exec
+## spawn list / stop / exec / doctor
 
 ```bash
 spawn list              # List running containers
@@ -188,9 +186,12 @@ spawn stop <id>         # Stop a running container
 spawn exec <id> -- ls   # Run a command in a running container
 spawn shell <id>        # Open /bin/bash in a running container
 spawn doctor            # Check local setup and workspace detection
+spawn doctor -C ~/code/project
 spawn doctor --json     # Same report in machine-readable form
 ```
 
-`spawn doctor` reports the workspace image resolution and, when `.spawn.toml` is present, the configured workspace defaults such as `agent` and `access`.
+`spawn doctor` reports the workspace image resolution and, when `.spawn.toml` is present, the configured workspace values such as `agent` and `access`.
+Use `-C/--cwd` to inspect another workspace without changing directories; a positional path still works for compatibility.
 For workspace-image runtimes it also shows cache state plus the tracked Dockerfile, context, config, and cache-record paths.
+It also reports whether the local `container` services are running, with a first-use hint to run `container system start --enable-kernel-install` when the host runtime is not initialized yet.
 `spawn doctor --json` emits a `checks` array together with a structured `workspace` object for automation.

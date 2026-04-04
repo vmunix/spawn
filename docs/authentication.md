@@ -71,3 +71,5 @@ CLI `--env` flags override values from the env file.
 | gh CLI | `~/.local/state/spawn/gh/` | `/home/coder/.config/gh/` |
 
 Agent credential directories are mounted into every container run. Host git config, `gh` auth, and SSH material are only mounted when the selected access profile requires them. Host auth mounts are read-only; agent credentials are read-write.
+
+For `--access trusted`, spawn copies standard SSH config files plus top-level `id_*` key files from `~/.ssh/`. It does not blanket-copy every top-level regular file in that directory.

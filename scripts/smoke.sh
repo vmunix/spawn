@@ -82,7 +82,7 @@ expect_regex "${REPLY}" '"access"[[:space:]]*:[[:space:]]*"minimal"' "rust docto
 
 run_and_capture "Rust fixture: cwd default + passthrough command" \
   /bin/bash -lc "cd \"${ROOT}/fixtures/rust-sample\" && \"${SPAWN_BIN}\" -- cargo test"
-expect_contains "${REPLY}" "session: command (cargo test)" "rust passthrough launch summary"
+expect_contains "${REPLY}" "session: command (cargo, 1 arg)" "rust passthrough launch summary"
 
 run_and_capture "Go fixture: explicit workspace + access profile" \
   "${SPAWN_BIN}" -C "${ROOT}/fixtures/go-sample" --access minimal -- /bin/bash -lc \

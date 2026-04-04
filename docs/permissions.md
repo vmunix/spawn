@@ -41,7 +41,7 @@ Permission mode controls which actions prompt. Access profiles control which hos
 
 - `minimal` (default): workspace, requested mounts, and persisted agent state only
 - `git`: `minimal` plus copied git config and `gh` CLI auth
-- `trusted`: `git` plus copied SSH material
+- `trusted`: `git` plus selected SSH config and standard `id_*` key material
 
 Use access profiles when you need host identity inside the container:
 

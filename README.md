@@ -1,16 +1,33 @@
 # spawn
 
-Sandboxed AI coding agents on macOS. Run Claude Code or Codex in filesystem-isolated Linux containers with a single command.
+Sandboxed AI coding agents on macOS. Built to run Claude Code or Codex in
+filesystem-isolated Linux containers with a single command.
 
 ```bash
 spawn build       # build container images (once)
 spawn             # run Claude Code in current directory
 spawn -- cargo test
 spawn doctor      # check local images, config, and workspace detection
+spawn doctor -C ~/code/project
 spawn doctor --json
 ```
 
-spawn detects your project's language, picks the right container image, mounts your code, and launches the agent. Your files are read/write inside the container — everything else on your system is isolated.
+spawn detects your project's language, picks the right container image, mounts
+your code, and launches the agent. Your files are read/write inside the
+container — everything else on your system is isolated.
+
+## Status
+
+`spawn` is a work in progress. PRs are welcome.
+
+The goal is similar to [Jai](https://jai.scs.stanford.edu/) on Linux: a jail
+for your agents that you'll actually use. On macOS we do not have the same
+underlying isolation model, so `spawn` takes the pragmatic route and builds on
+Apple's container and virtualization stack.
+
+It's written in Swift so it can directly use Apple's Containerization and
+Virtualization frameworks when that becomes the right boundary, instead of
+being limited to a shell wrapper forever.
 
 ## What it does
 
@@ -33,7 +50,7 @@ spawn detects your project's language, picks the right container image, mounts y
 ### Homebrew (recommended)
 
 ```bash
-brew install containers
+brew install container
 brew install vmunix/tap/spawn
 ```
 
@@ -80,6 +97,7 @@ spawn --shell
 
 # Check your local setup and current workspace
 spawn doctor
+spawn doctor -C ~/code/project
 spawn doctor --json
 ```
 
@@ -90,6 +108,7 @@ spawn doctor --json
 ```bash
 spawn [agent] [options]
 spawn -- <command...>
+spawn doctor [-C <dir>]
 ```
 
 | Option | Description |
@@ -121,7 +140,7 @@ Access profiles control host auth exposure:
 
 - `minimal` mounts only the workspace, requested extra mounts, and persisted agent state
 - `git` additionally mounts git config and `gh` CLI auth
-- `trusted` additionally mounts copied SSH material
+- `trusted` additionally mounts selected SSH config and standard `id_*` key material copied from `~/.ssh`
 
 Runtime mode controls how spawn reacts when a workspace defines its own runtime:
 
@@ -161,6 +180,7 @@ spawn stop <id>         # stop a container
 spawn exec <id> <cmd>   # run a command in a running container
 spawn shell <id>        # open /bin/bash in a running container
 spawn doctor            # check local images, config, and workspace detection
+spawn doctor -C ~/code/project
 spawn doctor --json     # same report in machine-readable form
 ```
 
@@ -197,7 +217,6 @@ Add a `.spawn.toml` to your repo root to set workspace defaults:
 ```toml
 [workspace]
 agent = "codex"
-access = "git"
 
 [toolchain]
 base = "rust"
@@ -206,12 +225,13 @@ base = "rust"
 Valid values:
 
 - `workspace.agent`: `claude-code`, `codex`
-- `workspace.access`: `minimal`, `git`, `trusted`
 - `toolchain.base`: `base`, `cpp`, `rust`, `go`, `js`
 
-CLI flags still win over `.spawn.toml`.
+Repo config can set the default agent and toolchain preference. Host access still requires an explicit `--access ...` at launch time, even if `.spawn.toml` contains an `access` value.
 
 spawn also reads `.devcontainer/devcontainer.json` to infer toolchains from images and features. If a viable devcontainer config is present, spawn prefers that explicit signal over repo-file heuristics. This makes existing VS Code devcontainer projects work with zero extra setup.
+
+`spawn doctor` also checks whether the local `container` services are running. If they are not, it points you at `container system start --enable-kernel-install`, which is the most common first-machine fix.
 
 ## Devcontainer support
 

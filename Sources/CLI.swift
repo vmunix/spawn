@@ -40,7 +40,7 @@ struct Spawn: AsyncParsableCommand {
               --rebuild-workspace-image Force a rebuild for workspace-image runs
 
             Workspace defaults:
-              .spawn.toml [workspace]   Default agent and access profile
+              .spawn.toml [workspace]   Default agent; access still requires --access
               .spawn.toml [toolchain]   Default spawn-managed toolchain base
 
             Operational commands:

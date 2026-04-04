@@ -3,6 +3,11 @@ import Foundation
 
 extension Spawn {
     struct Doctor: ParsableCommand {
+        struct SystemStatus: Sendable, Equatable {
+            let status: String
+            let appRoot: String?
+        }
+
         enum Status: String, Codable, Sendable {
             case ok
             case warning
@@ -63,10 +68,12 @@ extension Spawn {
                 Examples:
                   spawn doctor
                   spawn doctor --json
+                  spawn doctor -C ~/code/project
                   spawn doctor ~/code/project
 
                 Human output covers:
                   container CLI availability
+                  container system readiness
                   spawn-managed images
                   env file and persisted agent state
                   workspace detection, defaults, and runtime cache status
@@ -74,19 +81,58 @@ extension Spawn {
                 JSON output adds:
                   checks[]               High-level health checks with status/title/detail
                   workspace              Structured workspace result
-                  workspace.defaults     Configured agent/access defaults
+                  workspace.defaults     Configured workspace values from .spawn.toml
                   workspace.runtime      Workspace-image cache state and tracked paths
                 """
         )
 
-        @Argument(
-            help: "Directory to inspect as the workspace (default: current directory).",
-            transform: { URL(fileURLWithPath: $0).standardizedFileURL }
-        )
-        var path: URL = URL(fileURLWithPath: FileManager.default.currentDirectoryPath).standardizedFileURL
+        @Option(name: [.customShort("C"), .long], help: "Directory to inspect as the workspace (default: current directory).")
+        var cwd: String?
+
+        @Argument(help: "Directory to inspect as the workspace (default: current directory).")
+        var path: String?
 
         @Flag(name: .long, help: "Emit machine-readable JSON.")
         var json: Bool = false
+
+        static func resolveWorkspacePath(
+            cwd: String?,
+            path: String?,
+            currentDirectory: URL
+        ) throws -> URL {
+            if cwd != nil, path != nil {
+                throw ValidationError("Use either '-C/--cwd' or a positional path with 'spawn doctor', not both.")
+            }
+
+            let selectedPath = cwd ?? path ?? currentDirectory.path
+            return URL(fileURLWithPath: selectedPath).standardizedFileURL
+        }
+
+        static func parseSystemStatus(_ output: String) -> SystemStatus? {
+            var fields: [String: String] = [:]
+
+            for line in output.split(whereSeparator: \.isNewline) {
+                let trimmed = line.trimmingCharacters(in: .whitespaces)
+                guard !trimmed.isEmpty, !trimmed.hasPrefix("FIELD") else {
+                    continue
+                }
+
+                let parts = trimmed.split(maxSplits: 1, whereSeparator: \.isWhitespace).map(String.init)
+                guard let key = parts.first, parts.count == 2 else {
+                    continue
+                }
+                fields[key] = parts[1].trimmingCharacters(in: CharacterSet.whitespaces)
+            }
+
+            guard let status = fields["status"], !status.isEmpty else {
+                return nil
+            }
+
+            return SystemStatus(
+                status: status,
+                appRoot: fields["appRoot"]
+            )
+        }
 
         static func workspaceDetail(
             path: URL,
@@ -114,11 +160,15 @@ extension Spawn {
                 defaults.append("agent=\(agentName)")
             }
             if let accessName = workspaceConfig?.accessName {
-                defaults.append("access=\(accessName)")
+                let explicitOptIn =
+                    accessName == AccessProfile.minimal.rawValue
+                    ? "access=\(accessName)"
+                    : "access=\(accessName) (explicit --access required)"
+                defaults.append(explicitOptIn)
             }
 
             if !defaults.isEmpty {
-                detail += " [workspace defaults: \(defaults.joined(separator: ", "))]"
+                detail += " [workspace config: \(defaults.joined(separator: ", "))]"
             }
 
             return detail
@@ -346,6 +396,52 @@ extension Spawn {
             )
         }
 
+        private static func containerSystemCheck() -> Check {
+            do {
+                let (status, output) = try ContainerRunner.runCapture(args: ["system", "status"])
+                if status != 0 {
+                    return Check(
+                        status: .warning,
+                        title: "Container system",
+                        detail: "Container services did not report healthy status. Try 'container system start --enable-kernel-install'."
+                    )
+                }
+
+                guard let systemStatus = parseSystemStatus(output) else {
+                    return Check(
+                        status: .warning,
+                        title: "Container system",
+                        detail: "Container services responded, but spawn could not parse 'container system status'."
+                    )
+                }
+
+                if systemStatus.status == "running" {
+                    var detail = "running"
+                    if let appRoot = systemStatus.appRoot, !appRoot.isEmpty {
+                        detail += " (\(appRoot))"
+                    }
+
+                    return Check(
+                        status: .ok,
+                        title: "Container system",
+                        detail: detail
+                    )
+                }
+
+                return Check(
+                    status: .warning,
+                    title: "Container system",
+                    detail: "status=\(systemStatus.status). Run 'container system start --enable-kernel-install' if this machine has not been initialized yet."
+                )
+            } catch {
+                return Check(
+                    status: .warning,
+                    title: "Container system",
+                    detail: "Unable to inspect container services: \(error)"
+                )
+            }
+        }
+
         private static func envCheck() -> Check {
             let envPath = Paths.configDir.appendingPathComponent("env")
             guard FileManager.default.fileExists(atPath: envPath.path) else {
@@ -398,9 +494,14 @@ extension Spawn {
         }
 
         mutating func run() throws {
-            try Self.validateDirectory(at: path.path)
-            let inspection = ToolchainDetector.inspect(in: path)
-            let workspaceConfig = ToolchainDetector.loadWorkspaceConfig(in: path)
+            let workspace = try Self.resolveWorkspacePath(
+                cwd: cwd,
+                path: path,
+                currentDirectory: URL(fileURLWithPath: FileManager.default.currentDirectoryPath).standardizedFileURL
+            )
+            try Self.validateDirectory(at: workspace.path)
+            let inspection = ToolchainDetector.inspect(in: workspace)
+            let workspaceConfig = ToolchainDetector.loadWorkspaceConfig(in: workspace)
             var checks: [Check] = []
 
             do {
@@ -421,6 +522,7 @@ extension Spawn {
                             detail: "\(ContainerRunner.containerPath) responded with status \(status)"
                         ))
                 }
+                checks.append(Self.containerSystemCheck())
             } catch {
                 checks.append(
                     Check(
@@ -432,17 +534,17 @@ extension Spawn {
 
             checks.append(Self.imageCheck())
             checks.append(Self.envCheck())
-            checks.append(Self.workspaceCheck(at: path))
+            checks.append(Self.workspaceCheck(at: workspace))
             checks.append(contentsOf: Self.stateChecks())
 
-            let workspace = Self.workspaceReport(
-                path: path,
+            let workspaceReport = Self.workspaceReport(
+                path: workspace,
                 inspection: inspection,
                 workspaceConfig: workspaceConfig
             )
 
             if json {
-                Swift.print(try Self.renderJSON(Self.report(checks: checks, workspace: workspace)))
+                Swift.print(try Self.renderJSON(Self.report(checks: checks, workspace: workspaceReport)))
                 return
             }
 

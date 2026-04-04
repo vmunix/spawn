@@ -16,6 +16,14 @@ spawn doctor      # check local images, config, and workspace detection
 
 spawn detects your project's language, picks the right container image, mounts your code, and launches the agent. Your files are read/write inside the container -- everything else on your system is isolated.
 
+## Status and goals
+
+`spawn` is still a work in progress, and PRs are welcome.
+
+The product goal is close to [Jai](https://jai.scs.stanford.edu/) on Linux: a jail for your agents that you will actually use, because the front door is simple enough to fit normal workflows. On macOS we do not have the same Linux isolation primitives, so `spawn` uses Apple's container and virtualization stack as the practical path to something similar.
+
+It is written in Swift so the project can directly use Apple's Containerization and Virtualization frameworks when that becomes useful, rather than staying a thin shell wrapper forever.
+
 ## Install
 
 ### Homebrew (recommended)
@@ -73,5 +81,7 @@ spawn doctor
 - **Auto-detects your project's toolchain** (C++, Rust, Go, JS/TS) and picks the right container image
 - **Safe mode by default** -- prompts before `git push`, PR creation, and other remote-write operations
 - **Uses explicit access profiles** -- default `minimal`, with opt-in `git` and `trusted` host auth exposure
+- **Requires explicit host-auth opt-in** -- repo config can pick an agent, but host access still requires `--access`
+- **Keeps `trusted` narrower than a full `~/.ssh` import** -- standard SSH config and `id_*` key material only
 - **Persists OAuth credentials** across runs -- authenticate once, not every session
 - **No API keys required** -- Pro/Max plan users authenticate via OAuth

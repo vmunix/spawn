@@ -1,7 +1,67 @@
+import ArgumentParser
 import Foundation
 import Testing
 
 @testable import spawn
+
+@Test func resolveWorkspacePathPrefersCwdOption() throws {
+    let currentDirectory = fileURL("/Users/me/code/current")
+    let resolved = try Spawn.Doctor.resolveWorkspacePath(
+        cwd: "/Users/me/code/other",
+        path: nil,
+        currentDirectory: currentDirectory
+    )
+
+    #expect(resolved.path == "/Users/me/code/other")
+}
+
+@Test func resolveWorkspacePathAcceptsPositionalPath() throws {
+    let currentDirectory = fileURL("/Users/me/code/current")
+    let resolved = try Spawn.Doctor.resolveWorkspacePath(
+        cwd: nil,
+        path: "/Users/me/code/project",
+        currentDirectory: currentDirectory
+    )
+
+    #expect(resolved.path == "/Users/me/code/project")
+}
+
+@Test func resolveWorkspacePathRejectsConflictingSelectors() {
+    #expect(throws: ValidationError.self) {
+        try Spawn.Doctor.resolveWorkspacePath(
+            cwd: "/Users/me/code/one",
+            path: "/Users/me/code/two",
+            currentDirectory: fileURL("/Users/me/code/current")
+        )
+    }
+}
+
+@Test func parseSystemStatusReadsStatusAndAppRoot() {
+    let output = """
+        FIELD              VALUE
+        status             running
+        appRoot            /Users/me/Library/Application Support/com.apple.container/
+        installRoot        /opt/homebrew/Cellar/container/0.11.0/
+        """
+
+    let status = Spawn.Doctor.parseSystemStatus(output)
+    #expect(
+        status
+            == Spawn.Doctor.SystemStatus(
+                status: "running",
+                appRoot: "/Users/me/Library/Application Support/com.apple.container/"
+            )
+    )
+}
+
+@Test func parseSystemStatusReturnsNilWithoutStatusField() {
+    let output = """
+        FIELD              VALUE
+        appRoot            /Users/me/Library/Application Support/com.apple.container/
+        """
+
+    #expect(Spawn.Doctor.parseSystemStatus(output) == nil)
+}
 
 @Test func workspaceDetailIncludesWorkspaceDefaults() {
     let detail = Spawn.Doctor.workspaceDetail(
@@ -15,7 +75,7 @@ import Testing
     )
 
     #expect(detail.contains("/Users/me/code/project -> spawn-rust:latest from .spawn.toml"))
-    #expect(detail.contains("[workspace defaults: agent=codex, access=git]"))
+    #expect(detail.contains("[workspace config: agent=codex, access=git (explicit --access required)]"))
 }
 
 @Test func workspaceDetailOmitsWorkspaceDefaultsWhenUnset() {

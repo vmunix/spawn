@@ -12,7 +12,7 @@ import Testing
     #expect(help.contains("Runtime selection:"))
     #expect(help.contains("--runtime workspace-image"))
     #expect(help.contains("Workspace defaults:"))
-    #expect(help.contains(".spawn.toml [workspace]"))
+    #expect(help.contains(".spawn.toml [workspace]   Default agent; access still requires --access"))
     #expect(help.contains("Bare invocations route to `spawn run`."))
     #expect(help.contains("spawn help run"))
 }
@@ -24,16 +24,19 @@ import Testing
     #expect(help.contains("--access minimal"))
     #expect(help.contains("--runtime workspace-image"))
     #expect(help.contains("--rebuild-workspace-image"))
-    #expect(help.contains(".spawn.toml [workspace]"))
+    #expect(help.contains(".spawn.toml [workspace]        Default agent; access still requires --access"))
     #expect(help.contains("Safe mode is the default."))
 }
 
 @Test func doctorHelpExplainsHumanAndJSONOutputs() {
     let help = Spawn.helpMessage(for: Spawn.Doctor.self, columns: 100)
 
+    #expect(help.contains("spawn doctor -C ~/code/project"))
     #expect(help.contains("Human output covers:"))
+    #expect(help.contains("container system readiness"))
     #expect(help.contains("workspace.defaults"))
     #expect(help.contains("workspace.runtime"))
+    #expect(help.contains("-C, --cwd"))
 }
 
 @Test func imageAndBuildHelpExplainManagedImageScope() {

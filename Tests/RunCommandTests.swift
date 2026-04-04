@@ -51,6 +51,36 @@ import Testing
     #expect(launchRequest.workspaceConfig?.accessName == "git")
 }
 
+@Test func effectiveAccessNameIgnoresRepoConfiguredAccessElevation() {
+    let workspaceConfig = WorkspaceConfig(
+        toolchainName: nil,
+        agentName: "codex",
+        accessName: "trusted"
+    )
+
+    #expect(
+        Spawn.Run.effectiveAccessName(
+            accessOverride: nil,
+            workspaceConfig: workspaceConfig
+        ) == AccessProfile.minimal.rawValue
+    )
+}
+
+@Test func effectiveAccessNameStillHonorsExplicitCLIOverride() {
+    let workspaceConfig = WorkspaceConfig(
+        toolchainName: nil,
+        agentName: "codex",
+        accessName: "trusted"
+    )
+
+    #expect(
+        Spawn.Run.effectiveAccessName(
+            accessOverride: "git",
+            workspaceConfig: workspaceConfig
+        ) == AccessProfile.git.rawValue
+    )
+}
+
 @Test func resolveLaunchRequestUsesCwdOverrideForWorkspaceSelection() throws {
     let workspace = try makeTempDir(files: [:])
 
@@ -206,7 +236,32 @@ import Testing
         memory: "8g"
     )
 
-    #expect(lines.contains("  session: command (cargo test)"))
+    #expect(lines.contains("  session: command (cargo, 1 arg)"))
+}
+
+@Test func launchSummarySummarizesCommandWithoutEchoingArguments() {
+    let workspace = URL(fileURLWithPath: "/Users/me/code/project")
+    let lines = Spawn.Run.launchSummaryLines(
+        workspace: workspace,
+        agent: "claude-code",
+        shell: false,
+        command: ["/bin/bash", "-lc", "echo super-secret-token"],
+        yolo: false,
+        runtimeMode: .spawn,
+        toolchainWasOverridden: false,
+        detection: ToolchainDetector.Inspection(toolchain: .base, source: .fallback),
+        resolvedToolchain: .base,
+        image: "spawn-base:latest",
+        accessProfile: .minimal,
+        extraMountCount: 0,
+        readOnlyMountCount: 0,
+        envCount: 0,
+        cpus: 4,
+        memory: "8g"
+    )
+
+    #expect(lines.contains("  session: command (/bin/bash, 2 args)"))
+    #expect(lines.contains { $0.contains("super-secret-token") } == false)
 }
 
 @Test func normalizedCommandDropsLeadingSeparator() {

@@ -167,9 +167,16 @@ enum WorkspaceImageRuntime: Sendable {
     }
 
     static func cacheStatus(for plan: Plan, storeRoot: URL? = nil) -> CacheStatus {
-        let imageExists = ImageChecker.imageExists(plan.image, storeRoot: storeRoot)
+        let imageStatus = ImageChecker.imageStatus(plan.image, storeRoot: storeRoot)
         guard let record = loadCacheRecord(at: plan.cacheRecord) else {
-            return imageExists ? .stale(reason: "cache metadata missing") : .notBuilt
+            switch imageStatus {
+            case .present:
+                return .stale(reason: "cache metadata missing")
+            case .missing:
+                return .notBuilt
+            case .unknown:
+                return .stale(reason: "unable to verify cached image state")
+            }
         }
 
         guard record.image == plan.image else {
@@ -184,8 +191,13 @@ enum WorkspaceImageRuntime: Sendable {
         guard record.contextPath == plan.context.path else {
             return .stale(reason: "build context changed")
         }
-        guard imageExists else {
+        switch imageStatus {
+        case .present:
+            break
+        case .missing:
             return .stale(reason: "cached image is missing")
+        case .unknown:
+            return .stale(reason: "unable to verify cached image state")
         }
         guard record.fingerprint == plan.fingerprint else {
             return .stale(reason: "build inputs changed")

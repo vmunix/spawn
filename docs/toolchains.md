@@ -64,7 +64,6 @@ Create a `.spawn.toml` file in your project root:
 ```toml
 [workspace]
 agent = "codex"
-access = "git"
 
 [toolchain]
 base = "rust"
@@ -73,10 +72,9 @@ base = "rust"
 Valid values:
 
 - `workspace.agent`: `claude-code`, `codex`
-- `workspace.access`: `minimal`, `git`, `trusted`
 - `toolchain.base`: `base`, `cpp`, `rust`, `go`, `js`
 
-CLI flags override `.spawn.toml` when both are present.
+`.spawn.toml` can set the default agent and toolchain preference. Host access still requires an explicit `--access ...` at launch time.
 
 ### Custom image
 

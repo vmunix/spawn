@@ -91,7 +91,9 @@ import Testing
     let workspace = try makeTempDir(files: ["Dockerfile": "FROM ubuntu:24.04"])
     let stateDir = try makeTempDir(files: [:])
     let plan = try WorkspaceImageRuntime.plan(for: workspace, stateDir: stateDir)
-    let storeRoot = try makeTempDir(files: [:])
+    let storeRoot = try makeTempDir(files: [
+        "state.json": "{}"
+    ])
 
     let status = WorkspaceImageRuntime.cacheStatus(for: plan, storeRoot: storeRoot)
     #expect(status == .notBuilt)
@@ -130,7 +132,7 @@ import Testing
 
     let storeRoot = try makeTempDir(files: [:])
     let status = WorkspaceImageRuntime.cacheStatus(for: plan, storeRoot: storeRoot)
-    #expect(status == .stale(reason: "cached image is missing"))
+    #expect(status == .stale(reason: "unable to verify cached image state"))
 }
 
 @Test func workspaceImageRequestedCacheStatusCanForceRebuild() throws {
