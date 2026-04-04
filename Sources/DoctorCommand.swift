@@ -3,9 +3,16 @@ import Foundation
 
 extension Spawn {
     struct Doctor: ParsableCommand {
+        typealias CommandCapture = @Sendable (_ executableURL: URL, _ arguments: [String]) throws -> (Int32, String)
+
         struct SystemStatus: Sendable, Equatable {
             let status: String
             let appRoot: String?
+        }
+
+        private struct ContainerSystemReport: Sendable {
+            let check: Check
+            let systemStatus: SystemStatus?
         }
 
         enum Status: String, Codable, Sendable {
@@ -22,7 +29,7 @@ extension Spawn {
             }
         }
 
-        private struct Check: Sendable {
+        struct Check: Sendable {
             let status: Status
             let title: String
             let detail: String
@@ -44,6 +51,7 @@ extension Spawn {
             let cacheStatus: String
             let cacheReason: String?
             let dockerfilePath: String
+            let dockerignorePath: String?
             let contextPath: String
             let configPath: String?
             let cacheRecordPath: String
@@ -74,6 +82,7 @@ extension Spawn {
                 Human output covers:
                   container CLI availability
                   container system readiness
+                  default kernel and Rosetta readiness
                   spawn-managed images
                   env file and persisted agent state
                   workspace detection, defaults, and runtime cache status
@@ -132,6 +141,50 @@ extension Spawn {
                 status: status,
                 appRoot: fields["appRoot"]
             )
+        }
+
+        static var hostContainerArchitecture: String {
+            #if arch(arm64)
+            "arm64"
+            #elseif arch(x86_64)
+            "amd64"
+            #else
+            "unknown"
+            #endif
+        }
+
+        static var requiresRosetta: Bool {
+            hostContainerArchitecture == "arm64"
+        }
+
+        static func defaultKernelPath(
+            appRoot: String,
+            containerArchitecture: String = hostContainerArchitecture
+        ) -> String {
+            URL(fileURLWithPath: appRoot)
+                .appendingPathComponent("kernels/default.kernel-\(containerArchitecture)")
+                .standardizedFileURL
+                .path
+        }
+
+        static func runCommandCapture(
+            executableURL: URL,
+            arguments: [String]
+        ) throws -> (Int32, String) {
+            let process = Process()
+            process.executableURL = executableURL
+            process.arguments = arguments
+
+            let pipe = Pipe()
+            process.standardOutput = pipe
+            process.standardError = pipe
+
+            try process.run()
+            process.waitUntilExit()
+
+            let data = pipe.fileHandleForReading.readDataToEndOfFile()
+            let output = String(decoding: data, as: UTF8.self)
+            return (process.terminationStatus, output)
         }
 
         static func workspaceDetail(
@@ -222,6 +275,7 @@ extension Spawn {
                 cacheStatus: cacheStatusName,
                 cacheReason: cacheReason,
                 dockerfilePath: plan.dockerfile.path,
+                dockerignorePath: plan.dockerignore?.path,
                 contextPath: plan.context.path,
                 configPath: plan.configFile?.path,
                 cacheRecordPath: plan.cacheRecord.path
@@ -259,6 +313,9 @@ extension Spawn {
                 "context=\(plan.context.path)",
                 "cache=\(plan.cacheRecord.path)",
             ]
+            if let dockerignore = plan.dockerignore {
+                trackedPaths.append("dockerignore=\(dockerignore.path)")
+            }
             if let configFile = plan.configFile {
                 trackedPaths.append("config=\(configFile.path)")
             }
@@ -396,22 +453,28 @@ extension Spawn {
             )
         }
 
-        private static func containerSystemCheck() -> Check {
+        private static func containerSystemReport() -> ContainerSystemReport {
             do {
                 let (status, output) = try ContainerRunner.runCapture(args: ["system", "status"])
                 if status != 0 {
-                    return Check(
-                        status: .warning,
-                        title: "Container system",
-                        detail: "Container services did not report healthy status. Try 'container system start --enable-kernel-install'."
+                    return ContainerSystemReport(
+                        check: Check(
+                            status: .warning,
+                            title: "Container system",
+                            detail: "Container services did not report healthy status. Try 'container system start --enable-kernel-install'."
+                        ),
+                        systemStatus: nil
                     )
                 }
 
                 guard let systemStatus = parseSystemStatus(output) else {
-                    return Check(
-                        status: .warning,
-                        title: "Container system",
-                        detail: "Container services responded, but spawn could not parse 'container system status'."
+                    return ContainerSystemReport(
+                        check: Check(
+                            status: .warning,
+                            title: "Container system",
+                            detail: "Container services responded, but spawn could not parse 'container system status'."
+                        ),
+                        systemStatus: nil
                     )
                 }
 
@@ -421,23 +484,108 @@ extension Spawn {
                         detail += " (\(appRoot))"
                     }
 
+                    return ContainerSystemReport(
+                        check: Check(
+                            status: .ok,
+                            title: "Container system",
+                            detail: detail
+                        ),
+                        systemStatus: systemStatus
+                    )
+                }
+
+                return ContainerSystemReport(
+                    check: Check(
+                        status: .warning,
+                        title: "Container system",
+                        detail: "status=\(systemStatus.status). Run 'container system start --enable-kernel-install' if this machine has not been initialized yet."
+                    ),
+                    systemStatus: systemStatus
+                )
+            } catch {
+                return ContainerSystemReport(
+                    check: Check(
+                        status: .warning,
+                        title: "Container system",
+                        detail: "Unable to inspect container services: \(error)"
+                    ),
+                    systemStatus: nil
+                )
+            }
+        }
+
+        static func defaultKernelCheck(
+            systemStatus: SystemStatus?,
+            fileManager: FileManager = .default,
+            containerArchitecture: String = hostContainerArchitecture
+        ) -> Check {
+            guard let systemStatus else {
+                return Check(
+                    status: .warning,
+                    title: "Default kernel",
+                    detail: "Unable to determine the default kernel because 'container system status' is unavailable."
+                )
+            }
+
+            guard let appRoot = systemStatus.appRoot, !appRoot.isEmpty else {
+                return Check(
+                    status: .warning,
+                    title: "Default kernel",
+                    detail: "Container services did not report an app root. Run 'container system kernel set --recommended' if this host has not been initialized yet."
+                )
+            }
+
+            let kernelPath = defaultKernelPath(appRoot: appRoot, containerArchitecture: containerArchitecture)
+            if fileManager.fileExists(atPath: kernelPath) {
+                return Check(
+                    status: .ok,
+                    title: "Default kernel",
+                    detail: kernelPath
+                )
+            }
+
+            return Check(
+                status: .warning,
+                title: "Default kernel",
+                detail: "No default kernel at \(kernelPath). Run 'container system kernel set --recommended'."
+            )
+        }
+
+        static func rosettaCheck(
+            requiresRosetta: Bool = Self.requiresRosetta,
+            commandRunner: CommandCapture = Self.runCommandCapture
+        ) -> Check {
+            if !requiresRosetta {
+                return Check(
+                    status: .ok,
+                    title: "Rosetta",
+                    detail: "not required on this host architecture"
+                )
+            }
+
+            do {
+                let (status, _) = try commandRunner(
+                    URL(fileURLWithPath: "/usr/sbin/pkgutil"),
+                    ["--pkg-info", "com.apple.pkg.RosettaUpdateAuto"]
+                )
+                if status == 0 {
                     return Check(
                         status: .ok,
-                        title: "Container system",
-                        detail: detail
+                        title: "Rosetta",
+                        detail: "installed"
                     )
                 }
 
                 return Check(
                     status: .warning,
-                    title: "Container system",
-                    detail: "status=\(systemStatus.status). Run 'container system start --enable-kernel-install' if this machine has not been initialized yet."
+                    title: "Rosetta",
+                    detail: "not installed. Install it with 'softwareupdate --install-rosetta --agree-to-license'."
                 )
             } catch {
                 return Check(
                     status: .warning,
-                    title: "Container system",
-                    detail: "Unable to inspect container services: \(error)"
+                    title: "Rosetta",
+                    detail: "Unable to inspect Rosetta installation: \(error)"
                 )
             }
         }
@@ -522,7 +670,10 @@ extension Spawn {
                             detail: "\(ContainerRunner.containerPath) responded with status \(status)"
                         ))
                 }
-                checks.append(Self.containerSystemCheck())
+                let systemReport = Self.containerSystemReport()
+                checks.append(systemReport.check)
+                checks.append(Self.defaultKernelCheck(systemStatus: systemReport.systemStatus))
+                checks.append(Self.rosettaCheck())
             } catch {
                 checks.append(
                     Check(

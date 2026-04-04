@@ -108,6 +108,7 @@ spawn --runtime spawn
 ```
 
 `spawn --runtime workspace-image` reuses the built workspace image until the tracked build inputs change.
+Context-root `.dockerignore` rules are respected, so ignored files do not trigger rebuilds.
 Add `--rebuild-workspace-image` when you want to force a rebuild.
 Use `spawn doctor` to inspect the current cache state and the tracked workspace-image inputs.
 

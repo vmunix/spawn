@@ -34,6 +34,7 @@ import Testing
     #expect(help.contains("spawn doctor -C ~/code/project"))
     #expect(help.contains("Human output covers:"))
     #expect(help.contains("container system readiness"))
+    #expect(help.contains("default kernel and Rosetta readiness"))
     #expect(help.contains("workspace.defaults"))
     #expect(help.contains("workspace.runtime"))
     #expect(help.contains("-C, --cwd"))

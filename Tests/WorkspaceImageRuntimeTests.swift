@@ -12,6 +12,7 @@ import Testing
     #expect(plan.source == .dockerfile)
     #expect(plan.dockerfile.path == workspace.appendingPathComponent("Dockerfile").path)
     #expect(plan.context.path == workspace.path)
+    #expect(plan.dockerignore == nil)
     #expect(plan.image == WorkspaceImageRuntime.imageName(for: workspace))
     #expect(plan.cacheRecord.path.hasSuffix(".json"))
 }
@@ -31,7 +32,20 @@ import Testing
     #expect(plan.dockerfile.path == workspace.appendingPathComponent(".devcontainer/Dockerfile.dev").path)
     #expect(plan.context.path == workspace.path)
     #expect(plan.configFile?.path == workspace.appendingPathComponent(".devcontainer/devcontainer.json").path)
+    #expect(plan.dockerignore == nil)
     #expect(plan.env["FOO"] == "bar")
+}
+
+@Test func workspaceImagePlanTracksDockerignoreAtContextRoot() throws {
+    let workspace = try makeTempDir(files: [
+        "Dockerfile": "FROM ubuntu:24.04",
+        ".dockerignore": "ignored.txt\n",
+    ])
+
+    let stateDir = try makeTempDir(files: [:])
+    let plan = try WorkspaceImageRuntime.plan(for: workspace, stateDir: stateDir)
+
+    #expect(plan.dockerignore?.path == workspace.appendingPathComponent(".dockerignore").path)
 }
 
 @Test func workspaceImageNameIsStableAndSanitized() {
@@ -50,6 +64,7 @@ import Testing
         context: fileURL("/Users/me/code/project"),
         source: .dockerfile,
         configFile: nil,
+        dockerignore: nil,
         env: [:],
         fingerprint: "abc123",
         cacheRecord: fileURL("/tmp/workspace-image.json")
@@ -115,6 +130,96 @@ import Testing
 
     try "FROM ubuntu:24.04\nRUN echo hello\n".write(
         to: workspace.appendingPathComponent("Dockerfile"),
+        atomically: true,
+        encoding: .utf8
+    )
+
+    let updatedPlan = try WorkspaceImageRuntime.plan(for: workspace, stateDir: stateDir)
+    let status = WorkspaceImageRuntime.cacheStatus(for: updatedPlan, storeRoot: storeRoot)
+    #expect(status == .stale(reason: "build inputs changed"))
+}
+
+@Test func workspaceImageCacheIgnoresDockerignoredFiles() throws {
+    let workspace = try makeTempDir(files: [
+        "Dockerfile": "FROM ubuntu:24.04",
+        ".dockerignore": "ignored.txt\n",
+        "ignored.txt": "before",
+        "tracked.txt": "tracked",
+    ])
+    let stateDir = try makeTempDir(files: [:])
+    let originalPlan = try WorkspaceImageRuntime.plan(for: workspace, stateDir: stateDir)
+    try writeCacheRecord(for: originalPlan)
+
+    let storeRoot = try makeTempDir(files: [
+        "state.json": """
+        {
+            "\(originalPlan.image)": {}
+        }
+        """
+    ])
+
+    try "after".write(
+        to: workspace.appendingPathComponent("ignored.txt"),
+        atomically: true,
+        encoding: .utf8
+    )
+
+    let updatedPlan = try WorkspaceImageRuntime.plan(for: workspace, stateDir: stateDir)
+    let status = WorkspaceImageRuntime.cacheStatus(for: updatedPlan, storeRoot: storeRoot)
+    #expect(status == .ready)
+}
+
+@Test func workspaceImageCacheDoesNotRebuildWhenTrackedContentIsUnchanged() throws {
+    let workspace = try makeTempDir(files: [
+        "Dockerfile": "FROM ubuntu:24.04",
+        "tracked.txt": "same-content",
+    ])
+    let stateDir = try makeTempDir(files: [:])
+    let originalPlan = try WorkspaceImageRuntime.plan(for: workspace, stateDir: stateDir)
+    try writeCacheRecord(for: originalPlan)
+
+    let storeRoot = try makeTempDir(files: [
+        "state.json": """
+        {
+            "\(originalPlan.image)": {}
+        }
+        """
+    ])
+
+    try "same-content".write(
+        to: workspace.appendingPathComponent("tracked.txt"),
+        atomically: true,
+        encoding: .utf8
+    )
+
+    let updatedPlan = try WorkspaceImageRuntime.plan(for: workspace, stateDir: stateDir)
+    let status = WorkspaceImageRuntime.cacheStatus(for: updatedPlan, storeRoot: storeRoot)
+    #expect(status == .ready)
+}
+
+@Test func workspaceImageCacheRebuildsWhenDockerignoreNegationIncludesFile() throws {
+    let workspace = try makeTempDir(files: [
+        "Dockerfile": "FROM ubuntu:24.04",
+        ".dockerignore": """
+        generated/
+        !generated/keep.txt
+        """,
+        "generated/keep.txt": "before",
+    ])
+    let stateDir = try makeTempDir(files: [:])
+    let originalPlan = try WorkspaceImageRuntime.plan(for: workspace, stateDir: stateDir)
+    try writeCacheRecord(for: originalPlan)
+
+    let storeRoot = try makeTempDir(files: [
+        "state.json": """
+        {
+            "\(originalPlan.image)": {}
+        }
+        """
+    ])
+
+    try "after".write(
+        to: workspace.appendingPathComponent("generated/keep.txt"),
         atomically: true,
         encoding: .utf8
     )

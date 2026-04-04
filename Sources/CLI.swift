@@ -30,7 +30,7 @@ struct Spawn: AsyncParsableCommand {
               spawn -- cargo test      Run a command in the workspace container
               spawn --shell            Open a shell in the workspace container
               spawn -C ~/code/project  Run in another workspace
-              spawn doctor             Check images, config, and workspace detection
+              spawn doctor             Check runtime readiness, images, config, and workspace detection
               spawn doctor --json      Machine-readable diagnostics
 
             Runtime selection:

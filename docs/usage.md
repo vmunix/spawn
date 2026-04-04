@@ -17,7 +17,7 @@ nav_order: 3
 | `spawn stop` | Stop a running container |
 | `spawn exec` | Execute a command in a running container |
 | `spawn shell` | Open a shell in a running container |
-| `spawn doctor` | Check local images, config, and workspace detection |
+| `spawn doctor` | Check local runtime readiness, images, config, and workspace detection |
 
 `run` is the default subcommand, so `spawn` is equivalent to `spawn run`.
 
@@ -70,7 +70,7 @@ Runtime mode controls how spawn handles workspaces that define their own runtime
 - `spawn` opts into spawn-managed images explicitly
 - `workspace-image` builds and runs the workspace-defined image directly
 
-`workspace-image` reuses a cached workspace image when the tracked Dockerfile, devcontainer config, and build-context file metadata have not changed.
+`workspace-image` reuses a cached workspace image when the tracked Dockerfile, optional `.dockerignore`, devcontainer config, and non-ignored build-context file contents and permissions have not changed.
 Use `--rebuild-workspace-image` with `--runtime workspace-image` when you want to bypass the cache explicitly.
 
 If your repo has a root `Dockerfile` / `Containerfile`, or a `.devcontainer/devcontainer.json` with `build.dockerfile`, use:
@@ -150,6 +150,7 @@ USAGE: spawn build [<toolchain>] [--cpus <cpus>] [--memory <memory>] [--verbose]
 ```
 
 Build container images. Omit the toolchain to build all images (base is built first automatically since other images depend on it).
+`spawn build` uses an isolated temporary build context, so its behavior does not depend on your current working directory contents.
 
 ```bash
 spawn build            # Build all images
@@ -185,13 +186,13 @@ spawn list              # List running containers
 spawn stop <id>         # Stop a running container
 spawn exec <id> -- ls   # Run a command in a running container
 spawn shell <id>        # Open /bin/bash in a running container
-spawn doctor            # Check local setup and workspace detection
+spawn doctor            # Check local runtime readiness, setup, and workspace detection
 spawn doctor -C ~/code/project
 spawn doctor --json     # Same report in machine-readable form
 ```
 
-`spawn doctor` reports the workspace image resolution and, when `.spawn.toml` is present, the configured workspace values such as `agent` and `access`.
+`spawn doctor` reports local runtime readiness, the workspace image resolution, and, when `.spawn.toml` is present, the configured workspace values such as `agent` and `access`.
 Use `-C/--cwd` to inspect another workspace without changing directories; a positional path still works for compatibility.
-For workspace-image runtimes it also shows cache state plus the tracked Dockerfile, context, config, and cache-record paths.
-It also reports whether the local `container` services are running, with a first-use hint to run `container system start --enable-kernel-install` when the host runtime is not initialized yet.
+For workspace-image runtimes it also shows cache state plus the tracked Dockerfile, optional `.dockerignore`, context, config, and cache-record paths.
+It also reports whether the local `container` services are running, whether a default kernel is installed, and whether Rosetta is available on Apple Silicon hosts. When the host is not ready, it points you at the usual first-machine fixes such as `container system start --enable-kernel-install`, `container system kernel set --recommended`, and `softwareupdate --install-rosetta --agree-to-license`.
 `spawn doctor --json` emits a `checks` array together with a structured `workspace` object for automation.

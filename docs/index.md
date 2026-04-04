@@ -11,7 +11,7 @@ Sandboxed AI coding agents on macOS. Run Claude Code or Codex in filesystem-isol
 spawn build       # build container images (once)
 spawn             # run Claude Code in current directory
 spawn -- cargo test
-spawn doctor      # check local images, config, and workspace detection
+spawn doctor      # check local runtime readiness, images, config, and workspace detection
 ```
 
 spawn detects your project's language, picks the right container image, mounts your code, and launches the agent. Your files are read/write inside the container -- everything else on your system is isolated.

@@ -63,6 +63,75 @@ import Testing
     #expect(Spawn.Doctor.parseSystemStatus(output) == nil)
 }
 
+@Test func defaultKernelPathUsesHostContainerArchitectureSuffix() {
+    let path = Spawn.Doctor.defaultKernelPath(appRoot: "/Users/me/Library/Application Support/com.apple.container")
+    #expect(path.hasSuffix("kernels/default.kernel-\(Spawn.Doctor.hostContainerArchitecture)"))
+}
+
+@Test func defaultKernelCheckReportsInstalledKernel() throws {
+    let appRoot = try makeTempDir(files: [
+        "kernels/default.kernel-arm64": "kernel"
+    ])
+
+    let check = Spawn.Doctor.defaultKernelCheck(
+        systemStatus: Spawn.Doctor.SystemStatus(status: "running", appRoot: appRoot.path),
+        containerArchitecture: "arm64"
+    )
+
+    #expect(check.status == .ok)
+    #expect(check.title == "Default kernel")
+    #expect(check.detail == appRoot.appendingPathComponent("kernels/default.kernel-arm64").path)
+}
+
+@Test func defaultKernelCheckReportsMissingKernel() throws {
+    let appRoot = try makeTempDir(files: [:])
+
+    let check = Spawn.Doctor.defaultKernelCheck(
+        systemStatus: Spawn.Doctor.SystemStatus(status: "running", appRoot: appRoot.path),
+        containerArchitecture: "arm64"
+    )
+
+    #expect(check.status == .warning)
+    #expect(check.title == "Default kernel")
+    #expect(check.detail.contains("container system kernel set --recommended"))
+}
+
+@Test func rosettaCheckReportsInstalledOnAppleSilicon() {
+    let check = Spawn.Doctor.rosettaCheck(
+        requiresRosetta: true,
+        commandRunner: { executableURL, arguments in
+            #expect(executableURL.path == "/usr/sbin/pkgutil")
+            #expect(arguments == ["--pkg-info", "com.apple.pkg.RosettaUpdateAuto"])
+            return (0, "installed")
+        }
+    )
+
+    #expect(check.status == .ok)
+    #expect(check.title == "Rosetta")
+    #expect(check.detail == "installed")
+}
+
+@Test func rosettaCheckReportsMissingOnAppleSilicon() {
+    let check = Spawn.Doctor.rosettaCheck(
+        requiresRosetta: true,
+        commandRunner: { _, _ in
+            (1, "No receipt for 'com.apple.pkg.RosettaUpdateAuto' found")
+        }
+    )
+
+    #expect(check.status == .warning)
+    #expect(check.title == "Rosetta")
+    #expect(check.detail.contains("softwareupdate --install-rosetta --agree-to-license"))
+}
+
+@Test func rosettaCheckReportsNotRequiredOnNonAppleSiliconHosts() {
+    let check = Spawn.Doctor.rosettaCheck(requiresRosetta: false)
+
+    #expect(check.status == .ok)
+    #expect(check.title == "Rosetta")
+    #expect(check.detail == "not required on this host architecture")
+}
+
 @Test func workspaceDetailIncludesWorkspaceDefaults() {
     let detail = Spawn.Doctor.workspaceDetail(
         path: fileURL("/Users/me/code/project"),
@@ -105,7 +174,10 @@ import Testing
 }
 
 @Test func workspaceRuntimeDetailIncludesTrackedPathsAndCachedState() throws {
-    let workspace = try makeTempDir(files: ["Dockerfile": "FROM ubuntu:24.04"])
+    let workspace = try makeTempDir(files: [
+        "Dockerfile": "FROM ubuntu:24.04",
+        ".dockerignore": "ignored.txt\n",
+    ])
     let stateDir = try makeTempDir(files: [:])
     let plan = try WorkspaceImageRuntime.plan(for: workspace, stateDir: stateDir)
     try writeCacheRecord(for: plan)
@@ -128,6 +200,7 @@ import Testing
     #expect(detail.contains(plan.dockerfile.path))
     #expect(detail.contains(plan.context.path))
     #expect(detail.contains(plan.cacheRecord.path))
+    #expect(detail.contains(plan.dockerignore?.path ?? ""))
 }
 
 @Test func workspaceRuntimeDetailIncludesDevcontainerConfigPath() throws {
@@ -172,7 +245,10 @@ import Testing
 }
 
 @Test func workspaceReportIncludesStructuredRuntimeData() throws {
-    let workspace = try makeTempDir(files: ["Dockerfile": "FROM ubuntu:24.04"])
+    let workspace = try makeTempDir(files: [
+        "Dockerfile": "FROM ubuntu:24.04",
+        ".dockerignore": "ignored.txt\n",
+    ])
     let stateDir = try makeTempDir(files: [:])
     let plan = try WorkspaceImageRuntime.plan(for: workspace, stateDir: stateDir)
     try writeCacheRecord(for: plan)
@@ -196,6 +272,7 @@ import Testing
     #expect(report.defaults == Spawn.Doctor.WorkspaceDefaultsReport(agent: "codex", access: "git"))
     #expect(report.runtime?.cacheStatus == "ready")
     #expect(report.runtime?.dockerfilePath == plan.dockerfile.path)
+    #expect(report.runtime?.dockerignorePath == plan.dockerignore?.path)
     #expect(report.runtime?.cacheRecordPath == plan.cacheRecord.path)
 }
 
@@ -218,6 +295,7 @@ import Testing
                 cacheStatus: "stale",
                 cacheReason: "build inputs changed",
                 dockerfilePath: "/tmp/project/Dockerfile",
+                dockerignorePath: "/tmp/project/.dockerignore",
                 contextPath: "/tmp/project",
                 configPath: nil,
                 cacheRecordPath: "/tmp/cache.json"
@@ -235,6 +313,7 @@ import Testing
     #expect(workspace["source"] as? String == "dockerfile")
     #expect(runtime["cacheStatus"] as? String == "stale")
     #expect(runtime["cacheReason"] as? String == "build inputs changed")
+    #expect(runtime["dockerignorePath"] as? String == "/tmp/project/.dockerignore")
     #expect(checks.first?["status"] as? String == "ok")
 }
 

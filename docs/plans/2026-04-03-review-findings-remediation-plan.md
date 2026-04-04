@@ -1,7 +1,7 @@
 # Review Findings Remediation Plan
 
 **Date:** 2026-04-03
-**Status:** Proposed
+**Status:** In progress
 
 ## Goal
 
@@ -27,18 +27,18 @@ After that, we can tighten caching accuracy, reduce ambient coupling, and simpli
 
 ### Checklist
 
-- [ ] Make `ContainerRunner` resolve `container` through `PATH` for real, not just in docs/comments
-- [ ] Add tests for PATH-only `container` discovery
-- [ ] Change workspace config handling so `.spawn.toml` cannot raise `access` above the safe default without explicit user intent
+- [x] Make `ContainerRunner` resolve `container` through `PATH` for real, not just in docs/comments
+- [x] Add tests for PATH-only `container` discovery
+- [x] Change workspace config handling so `.spawn.toml` cannot raise `access` above the safe default without explicit user intent
 - [ ] Decide the precise policy for repo defaults:
   - allow `.spawn.toml` to lower access only
   - or ignore repo-configured `access` entirely unless a trusted flag/setting is present
-- [ ] Add tests proving untrusted repo config cannot silently opt users into `git` or `trusted`
-- [ ] Stop treating unreadable image-store metadata as definitive “image missing”
+- [x] Add tests proving untrusted repo config cannot silently opt users into `git` or `trusted`
+- [x] Stop treating unreadable image-store metadata as definitive “image missing”
 - [ ] Replace that failure with one of:
   - a softer warning plus attempted launch
   - or a distinct runtime warning that does not claim the image is absent
-- [ ] Add regression tests for image-store read failures
+- [x] Add regression tests for image-store read failures
 
 ### Notes
 
@@ -54,14 +54,14 @@ These are the highest-value fixes because they directly affect whether `spawn` i
 
 ### Checklist
 
-- [ ] Change `MountResolver` so auth mounts are only appended when the copy step succeeds
-- [ ] Surface partial-copy or empty-copy failures clearly to the user
-- [ ] Narrow `trusted` SSH import behavior:
+- [x] Change `MountResolver` so auth mounts are only appended when the copy step succeeds
+- [x] Surface partial-copy or empty-copy failures clearly to the user
+- [x] Narrow `trusted` SSH import behavior:
   - either selective key import
   - or an allowlist of expected SSH file names
-- [ ] Decide whether `known_hosts`, `config`, cert material, and backup keys should be included by default
-- [ ] Redact or truncate passthrough command display in launch summaries when arguments may contain secrets
-- [ ] Add tests for failed git/gh/ssh copy behavior and secret-safe summary rendering
+- [x] Decide whether `known_hosts`, `config`, cert material, and backup keys should be included by default
+- [x] Redact or truncate passthrough command display in launch summaries when arguments may contain secrets
+- [x] Add tests for failed git/gh/ssh copy behavior and secret-safe summary rendering
 
 ### Notes
 
@@ -76,12 +76,12 @@ This phase improves real security posture and reduces “it launched, but auth i
 
 ### Checklist
 
-- [ ] Extend `doctor` beyond `container system status`
-- [ ] Detect and explain missing kernel/default-kernel scenarios
-- [ ] Detect and explain other prerequisite failures that surfaced during smoke work
+- [x] Extend `doctor` beyond `container system status`
+- [x] Detect and explain missing kernel/default-kernel scenarios
+- [x] Detect and explain other prerequisite failures that surfaced during smoke work
 - [ ] Decide whether `doctor` should probe build/run readiness or remain purely diagnostic
-- [ ] Keep `doctor --json` stable while adding the new fields
-- [ ] Add tests for parsed/system readiness states and failure messaging
+- [x] Keep `doctor --json` stable while adding the new fields
+- [x] Add tests for parsed/system readiness states and failure messaging
 
 ### Notes
 
@@ -96,11 +96,11 @@ The current `Container system` check is useful, but it does not yet fully justif
 
 ### Checklist
 
-- [ ] Teach workspace-image fingerprinting about `.dockerignore`
-- [ ] Decide whether cache identity should be content-based, metadata-based, or mixed
+- [x] Teach workspace-image fingerprinting about `.dockerignore`
+- [x] Decide whether cache identity should be content-based, metadata-based, or mixed
 - [ ] Exclude common non-build artifacts from cache invalidation when appropriate
 - [ ] Revisit the cache messaging in `doctor` and runtime output so it matches the actual invalidation model
-- [ ] Add tests for `.dockerignore`-excluded files and stable cache reuse
+- [x] Add tests for `.dockerignore`-excluded files and stable cache reuse
 
 ### Notes
 
@@ -115,9 +115,9 @@ This is important for trust. The feature is now prominent enough that misleading
 
 ### Checklist
 
-- [ ] Make `spawn build` use a controlled build context instead of always using `.`
-- [ ] Decide whether build context should be an empty temp dir or an explicit repo-owned context
-- [ ] Add tests proving `spawn build` behavior does not depend on the caller’s current working tree
+- [x] Make `spawn build` use a controlled build context instead of always using `.`
+- [x] Decide whether build context should be an empty temp dir or an explicit repo-owned context
+- [x] Add tests proving `spawn build` behavior does not depend on the caller’s current working tree
 
 ### Notes
 

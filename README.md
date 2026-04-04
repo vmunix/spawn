@@ -7,7 +7,7 @@ filesystem-isolated Linux containers with a single command.
 spawn build       # build container images (once)
 spawn             # run Claude Code in current directory
 spawn -- cargo test
-spawn doctor      # check local images, config, and workspace detection
+spawn doctor      # check local runtime readiness, images, config, and workspace detection
 spawn doctor -C ~/code/project
 spawn doctor --json
 ```
@@ -95,11 +95,13 @@ spawn --access git
 # Drop into a shell for debugging
 spawn --shell
 
-# Check your local setup and current workspace
+# Check local runtime readiness and the current workspace
 spawn doctor
 spawn doctor -C ~/code/project
 spawn doctor --json
 ```
+
+`spawn build` uses an isolated temporary build context, so it does not depend on whatever files happen to be in your current working directory.
 
 ## Usage
 
@@ -148,7 +150,7 @@ Runtime mode controls how spawn reacts when a workspace defines its own runtime:
 - `spawn` opts into spawn-managed images explicitly
 - `workspace-image` builds and runs the workspace-defined image directly
 
-`workspace-image` reuses a cached workspace image when the tracked Dockerfile, devcontainer config, and build-context file metadata have not changed.
+`workspace-image` reuses a cached workspace image when the tracked Dockerfile, optional `.dockerignore`, devcontainer config, and non-ignored build-context file contents and permissions have not changed.
 Use `--rebuild-workspace-image` with `--runtime workspace-image` when you want to bypass the cache explicitly.
 
 If your repo has a root `Dockerfile` / `Containerfile`, or a `.devcontainer/devcontainer.json` with `build.dockerfile`, spawn currently requires an explicit choice:
@@ -179,7 +181,7 @@ spawn list              # list running containers
 spawn stop <id>         # stop a container
 spawn exec <id> <cmd>   # run a command in a running container
 spawn shell <id>        # open /bin/bash in a running container
-spawn doctor            # check local images, config, and workspace detection
+spawn doctor            # check local runtime readiness, images, config, and workspace detection
 spawn doctor -C ~/code/project
 spawn doctor --json     # same report in machine-readable form
 ```
@@ -231,7 +233,7 @@ Repo config can set the default agent and toolchain preference. Host access stil
 
 spawn also reads `.devcontainer/devcontainer.json` to infer toolchains from images and features. If a viable devcontainer config is present, spawn prefers that explicit signal over repo-file heuristics. This makes existing VS Code devcontainer projects work with zero extra setup.
 
-`spawn doctor` also checks whether the local `container` services are running. If they are not, it points you at `container system start --enable-kernel-install`, which is the most common first-machine fix.
+`spawn doctor` also checks local runtime readiness: whether the `container` services are running, whether a default kernel is installed, and whether Rosetta is available on Apple Silicon hosts. When something is missing, it points you at the most common first-machine fixes.
 
 ## Devcontainer support
 
@@ -241,7 +243,7 @@ If your project already uses `.devcontainer/devcontainer.json`, spawn treats tha
 - the launch summary and `spawn doctor` show when `.devcontainer/devcontainer.json` drove the choice
 - this makes spawn a good fit for projects already set up for VS Code Dev Containers
 
-If `.devcontainer/devcontainer.json` uses `build.dockerfile`, `spawn --runtime workspace-image` builds and runs that workspace-defined image directly and reuses it until the tracked build inputs change. `spawn --runtime spawn` remains available when you want to ignore the workspace runtime and use spawn-managed images instead.
+If `.devcontainer/devcontainer.json` uses `build.dockerfile`, `spawn --runtime workspace-image` builds and runs that workspace-defined image directly and reuses it until the tracked build inputs change. That cache respects a context-root `.dockerignore`, so ignored files do not force rebuilds. `spawn --runtime spawn` remains available when you want to ignore the workspace runtime and use spawn-managed images instead.
 
 For JS/TS repos, `spawn-js:latest` bundles Node.js 22 LTS, Corepack, Bun, and Deno so the common runtime and package-manager paths work out of the box.
 
