@@ -125,9 +125,14 @@ enum WorkspaceImageRuntime: Sendable {
         plan: Plan,
         cpus: Int,
         memory: String,
+        forceRebuild: Bool = false,
         storeRoot: URL? = nil
     ) throws -> BuildResult {
-        let status = cacheStatus(for: plan, storeRoot: storeRoot)
+        let status = requestedCacheStatus(
+            for: plan,
+            forceRebuild: forceRebuild,
+            storeRoot: storeRoot
+        )
         switch status {
         case .ready:
             print("Using cached workspace image \(plan.image)")
@@ -148,6 +153,17 @@ enum WorkspaceImageRuntime: Sendable {
         let slug = sanitizedComponent(workspace.lastPathComponent)
         let hash = fnv1a64Hex(workspace.path)
         return "spawn-workspace-\(slug)-\(hash):latest"
+    }
+
+    static func requestedCacheStatus(
+        for plan: Plan,
+        forceRebuild: Bool,
+        storeRoot: URL? = nil
+    ) -> CacheStatus {
+        if forceRebuild {
+            return .stale(reason: "forced rebuild requested")
+        }
+        return cacheStatus(for: plan, storeRoot: storeRoot)
     }
 
     static func cacheStatus(for plan: Plan, storeRoot: URL? = nil) -> CacheStatus {

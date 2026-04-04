@@ -96,6 +96,7 @@ spawn -- <command...>
 | `--shell` | Drop into a shell instead of running an agent |
 | `-C, --cwd <dir>` | Directory to mount as workspace (default: current directory) |
 | `--runtime <name>` | Runtime mode: `auto`, `spawn`, `workspace-image` |
+| `--rebuild-workspace-image` | Force a rebuild when using `--runtime workspace-image` |
 | `--access <name>` | Host access profile: `minimal`, `git`, `trusted` |
 | `--toolchain <name>` | Override auto-detected toolchain: `base`, `cpp`, `rust`, `go`, `js` |
 | `--image <name>` | Override auto-selected container image |
@@ -127,11 +128,13 @@ Runtime mode controls how spawn reacts when a workspace defines its own runtime:
 - `workspace-image` builds and runs the workspace-defined image directly
 
 `workspace-image` reuses a cached workspace image when the tracked Dockerfile, devcontainer config, and build-context file metadata have not changed.
+Use `--rebuild-workspace-image` with `--runtime workspace-image` when you want to bypass the cache explicitly.
 
 If your repo has a root `Dockerfile` / `Containerfile`, or a `.devcontainer/devcontainer.json` with `build.dockerfile`, spawn currently requires an explicit choice:
 
 ```bash
 spawn --runtime workspace-image
+spawn --runtime workspace-image --rebuild-workspace-image
 spawn --runtime spawn
 ```
 

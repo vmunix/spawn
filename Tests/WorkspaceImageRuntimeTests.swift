@@ -133,6 +133,19 @@ import Testing
     #expect(status == .stale(reason: "cached image is missing"))
 }
 
+@Test func workspaceImageRequestedCacheStatusCanForceRebuild() throws {
+    let workspace = try makeTempDir(files: ["Dockerfile": "FROM ubuntu:24.04"])
+    let stateDir = try makeTempDir(files: [:])
+    let plan = try WorkspaceImageRuntime.plan(for: workspace, stateDir: stateDir)
+
+    let status = WorkspaceImageRuntime.requestedCacheStatus(
+        for: plan,
+        forceRebuild: true,
+        storeRoot: nil
+    )
+    #expect(status == .stale(reason: "forced rebuild requested"))
+}
+
 private func writeCacheRecord(for plan: WorkspaceImageRuntime.Plan) throws {
     let record = WorkspaceImageRuntime.CacheRecord(
         image: plan.image,

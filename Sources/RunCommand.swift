@@ -20,6 +20,8 @@ extension Spawn {
                   spawn --shell                   Open a shell in the workspace container
                   spawn -C ~/code/project         Run in another workspace
                   spawn --access git              Mount git identity and gh auth, but not SSH keys
+                  spawn --runtime workspace-image --rebuild-workspace-image
+                                                  Force a rebuild of the workspace image
                   spawn --toolchain js            Force the JS/TS runtime image
                   spawn --yolo                    Disable safe-mode prompts
 
@@ -69,6 +71,9 @@ extension Spawn {
 
         @Option(name: .long, help: "Runtime mode: auto, spawn, workspace-image.")
         var runtime: String = RuntimeMode.auto.rawValue
+
+        @Flag(name: .long, help: "Force a rebuild when using '--runtime workspace-image'.")
+        var rebuildWorkspaceImage: Bool = false
 
         @Flag(name: .long, help: "Show container commands.")
         var verbose: Bool = false
@@ -165,6 +170,23 @@ extension Spawn {
             }
         }
 
+        static func validateRuntimeOptions(
+            runtimeMode: RuntimeMode,
+            image: String?,
+            toolchain: String?,
+            rebuildWorkspaceImage: Bool
+        ) throws {
+            if rebuildWorkspaceImage, runtimeMode != .workspaceImage {
+                throw ValidationError("'--rebuild-workspace-image' requires '--runtime workspace-image'.")
+            }
+            if runtimeMode == .workspaceImage, toolchain != nil {
+                throw ValidationError("Use either '--runtime workspace-image' or '--toolchain', not both.")
+            }
+            if runtimeMode == .workspaceImage, image != nil {
+                throw ValidationError("Use either '--runtime workspace-image' or '--image', not both.")
+            }
+        }
+
         static func resolveLaunchRequest(
             agent: String?,
             cwdOverride: String?,
@@ -230,12 +252,12 @@ extension Spawn {
             let resolvedAccess = access ?? workspaceConfig?.accessName ?? AccessProfile.minimal.rawValue
             let accessProfile = try AccessProfile.parse(resolvedAccess)
             let runtimeMode = try RuntimeMode.parse(runtime)
-            if runtimeMode == .workspaceImage, toolchain != nil {
-                throw ValidationError("Use either '--runtime workspace-image' or '--toolchain', not both.")
-            }
-            if runtimeMode == .workspaceImage, image != nil {
-                throw ValidationError("Use either '--runtime workspace-image' or '--image', not both.")
-            }
+            try Self.validateRuntimeOptions(
+                runtimeMode: runtimeMode,
+                image: image,
+                toolchain: toolchain,
+                rebuildWorkspaceImage: rebuildWorkspaceImage
+            )
 
             // Resolve toolchain
             let detection = ToolchainDetector.inspect(in: path)
@@ -247,7 +269,12 @@ extension Spawn {
             let workspaceImagePlan: WorkspaceImageRuntime.Plan?
             if runtimeMode == .workspaceImage {
                 let plan = try WorkspaceImageRuntime.plan(for: path)
-                let result = try WorkspaceImageRuntime.ensureBuilt(plan: plan, cpus: cpus, memory: memory)
+                let result = try WorkspaceImageRuntime.ensureBuilt(
+                    plan: plan,
+                    cpus: cpus,
+                    memory: memory,
+                    forceRebuild: rebuildWorkspaceImage
+                )
                 workspaceImagePlan = result.plan
                 resolvedToolchain = .base
                 resolvedImage = plan.image

@@ -94,6 +94,37 @@ import Testing
     #expect(Spawn.Run.requiresExplicitRuntimeSelection(for: .cargo) == false)
 }
 
+@Test func rebuildWorkspaceImageFlagRequiresWorkspaceImageRuntime() {
+    #expect(throws: ValidationError.self) {
+        try Spawn.Run.validateRuntimeOptions(
+            runtimeMode: .spawn,
+            image: nil,
+            toolchain: nil,
+            rebuildWorkspaceImage: true
+        )
+    }
+}
+
+@Test func workspaceImageRuntimeRejectsToolchainAndImageOverrides() {
+    #expect(throws: ValidationError.self) {
+        try Spawn.Run.validateRuntimeOptions(
+            runtimeMode: .workspaceImage,
+            image: nil,
+            toolchain: "rust",
+            rebuildWorkspaceImage: false
+        )
+    }
+
+    #expect(throws: ValidationError.self) {
+        try Spawn.Run.validateRuntimeOptions(
+            runtimeMode: .workspaceImage,
+            image: "custom:latest",
+            toolchain: nil,
+            rebuildWorkspaceImage: false
+        )
+    }
+}
+
 @Test func launchSummaryIncludesCoreContext() {
     let workspace = URL(fileURLWithPath: "/Users/me/code/project")
     let lines = Spawn.Run.launchSummaryLines(
