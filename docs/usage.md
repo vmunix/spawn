@@ -188,6 +188,9 @@ spawn stop <id>         # Stop a running container
 spawn exec <id> -- ls   # Run a command in a running container
 spawn shell <id>        # Open /bin/bash in a running container
 spawn doctor            # Check local setup and workspace detection
+spawn doctor --json     # Same report in machine-readable form
 ```
 
 `spawn doctor` reports the workspace image resolution and, when `.spawn.toml` is present, the configured workspace defaults such as `agent` and `access`.
+For workspace-image runtimes it also shows cache state plus the tracked Dockerfile, context, config, and cache-record paths.
+`spawn doctor --json` emits a `checks` array together with a structured `workspace` object for automation.

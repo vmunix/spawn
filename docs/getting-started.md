@@ -109,5 +109,6 @@ spawn --runtime spawn
 
 `spawn --runtime workspace-image` reuses the built workspace image until the tracked build inputs change.
 Add `--rebuild-workspace-image` when you want to force a rebuild.
+Use `spawn doctor` to inspect the current cache state and the tracked workspace-image inputs.
 
 If your project already has a `.devcontainer/devcontainer.json`, spawn uses that as an explicit signal before falling back to file-based heuristics. This makes existing VS Code devcontainer projects work nicely with spawn.

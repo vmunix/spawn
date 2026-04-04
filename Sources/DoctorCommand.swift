@@ -3,7 +3,7 @@ import Foundation
 
 extension Spawn {
     struct Doctor: ParsableCommand {
-        private enum Status: Sendable {
+        enum Status: String, Codable, Sendable {
             case ok
             case warning
             case error
@@ -23,15 +23,51 @@ extension Spawn {
             let detail: String
         }
 
+        struct CheckReport: Codable, Sendable, Equatable {
+            let status: Status
+            let title: String
+            let detail: String
+        }
+
+        struct WorkspaceDefaultsReport: Codable, Sendable, Equatable {
+            let agent: String?
+            let access: String?
+        }
+
+        struct WorkspaceRuntimeReport: Codable, Sendable, Equatable {
+            let image: String
+            let cacheStatus: String
+            let cacheReason: String?
+            let dockerfilePath: String
+            let contextPath: String
+            let configPath: String?
+            let cacheRecordPath: String
+        }
+
+        struct WorkspaceReport: Codable, Sendable, Equatable {
+            let path: String
+            let source: String
+            let detail: String
+            let defaults: WorkspaceDefaultsReport?
+            let runtime: WorkspaceRuntimeReport?
+        }
+
+        struct Report: Codable, Sendable, Equatable {
+            let checks: [CheckReport]
+            let workspace: WorkspaceReport
+        }
+
         static let configuration = CommandConfiguration(
             abstract: "Check your spawn environment and current workspace.",
             discussion: """
                 Examples:
                   spawn doctor
+                  spawn doctor --json
                   spawn doctor ~/code/project
 
                 Checks the container CLI, local images, default config paths, and the
-                workspace detection result spawn would use for a run.
+                workspace detection result spawn would use for a run. Use --json for
+                machine-readable output.
                 """
         )
 
@@ -41,10 +77,15 @@ extension Spawn {
         )
         var path: URL = URL(fileURLWithPath: FileManager.default.currentDirectoryPath).standardizedFileURL
 
+        @Flag(name: .long, help: "Emit machine-readable JSON.")
+        var json: Bool = false
+
         static func workspaceDetail(
             path: URL,
             inspection: ToolchainDetector.Inspection,
-            workspaceConfig: WorkspaceConfig?
+            workspaceConfig: WorkspaceConfig?,
+            stateDir: URL = Paths.stateDir,
+            storeRoot: URL? = nil
         ) -> String {
             let image = inspection.toolchain?.imageName ?? "spawn-base:latest"
             var detail: String
@@ -53,9 +94,9 @@ extension Spawn {
             case .spawnToml, .devcontainer:
                 detail = "\(path.path) -> \(image) from \(inspection.source.detail)"
             case .devcontainerDockerfile:
-                detail = workspaceRuntimeDetail(path: path, inspection: inspection)
+                detail = workspaceRuntimeDetail(path: path, inspection: inspection, stateDir: stateDir, storeRoot: storeRoot)
             case .dockerfile:
-                detail = workspaceRuntimeDetail(path: path, inspection: inspection)
+                detail = workspaceRuntimeDetail(path: path, inspection: inspection, stateDir: stateDir, storeRoot: storeRoot)
             case .cargo, .goMod, .cmake, .bunLock, .denoConfig, .denoLock, .pnpmLock, .yarnLock, .packageLock, .packageJSON, .fallback:
                 detail = "\(path.path) -> \(image) (\(inspection.source.detail))"
             }
@@ -75,8 +116,67 @@ extension Spawn {
             return detail
         }
 
-        private static func workspaceRuntimeDetail(path: URL, inspection: ToolchainDetector.Inspection) -> String {
-            guard let plan = try? WorkspaceImageRuntime.plan(for: path) else {
+        static func workspaceRuntimeCacheStatus(
+            path: URL,
+            inspection: ToolchainDetector.Inspection,
+            stateDir: URL = Paths.stateDir,
+            storeRoot: URL? = nil
+        ) -> WorkspaceImageRuntime.CacheStatus? {
+            guard
+                inspection.source == .dockerfile || inspection.source == .devcontainerDockerfile,
+                let plan = try? WorkspaceImageRuntime.plan(for: path, stateDir: stateDir)
+            else {
+                return nil
+            }
+            return WorkspaceImageRuntime.cacheStatus(for: plan, storeRoot: storeRoot)
+        }
+
+        static func workspaceRuntimeReport(
+            path: URL,
+            inspection: ToolchainDetector.Inspection,
+            stateDir: URL = Paths.stateDir,
+            storeRoot: URL? = nil
+        ) -> WorkspaceRuntimeReport? {
+            guard
+                inspection.source == .dockerfile || inspection.source == .devcontainerDockerfile,
+                let plan = try? WorkspaceImageRuntime.plan(for: path, stateDir: stateDir)
+            else {
+                return nil
+            }
+
+            let cacheStatus = WorkspaceImageRuntime.cacheStatus(for: plan, storeRoot: storeRoot)
+            let cacheStatusName: String
+            let cacheReason: String?
+            switch cacheStatus {
+            case .ready:
+                cacheStatusName = "ready"
+                cacheReason = nil
+            case .notBuilt:
+                cacheStatusName = "not_built"
+                cacheReason = nil
+            case .stale(let reason):
+                cacheStatusName = "stale"
+                cacheReason = reason
+            }
+
+            return WorkspaceRuntimeReport(
+                image: plan.image,
+                cacheStatus: cacheStatusName,
+                cacheReason: cacheReason,
+                dockerfilePath: plan.dockerfile.path,
+                contextPath: plan.context.path,
+                configPath: plan.configFile?.path,
+                cacheRecordPath: plan.cacheRecord.path
+            )
+        }
+
+        static func workspaceRuntimeDetail(
+            path: URL,
+            inspection: ToolchainDetector.Inspection,
+            stateDir: URL = Paths.stateDir,
+            storeRoot: URL? = nil
+        ) -> String {
+            guard let plan = try? WorkspaceImageRuntime.plan(for: path, stateDir: stateDir) else {
                 switch inspection.source {
                 case .devcontainerDockerfile:
                     return "\(path.path) uses .devcontainer/devcontainer.json with build.dockerfile, but spawn could not resolve the workspace-image build inputs."
@@ -88,7 +188,7 @@ extension Spawn {
             }
 
             let buildState: String
-            switch WorkspaceImageRuntime.cacheStatus(for: plan) {
+            switch WorkspaceImageRuntime.cacheStatus(for: plan, storeRoot: storeRoot) {
             case .ready:
                 buildState = "cached, up to date"
             case .notBuilt:
@@ -96,17 +196,27 @@ extension Spawn {
             case .stale(let reason):
                 buildState = "rebuild needed: \(reason)"
             }
+            var trackedPaths = [
+                "dockerfile=\(plan.dockerfile.path)",
+                "context=\(plan.context.path)",
+                "cache=\(plan.cacheRecord.path)",
+            ]
+            if let configFile = plan.configFile {
+                trackedPaths.append("config=\(configFile.path)")
+            }
+            let trackedInputs = trackedPaths.joined(separator: "; ")
+
             switch inspection.source {
             case .devcontainerDockerfile:
                 return
-                    "\(path.path) uses .devcontainer/devcontainer.json with build.dockerfile -> \(plan.image) (\(buildState)). "
+                    "\(path.path) uses .devcontainer/devcontainer.json with build.dockerfile -> \(plan.image) (\(buildState)); \(trackedInputs). "
                     + "Use '--runtime workspace-image' to build and run it directly, or '--runtime spawn' to use spawn-managed images."
             case .dockerfile:
                 return
-                    "\(path.path) has a Dockerfile/Containerfile -> \(plan.image) (\(buildState)). "
+                    "\(path.path) has a Dockerfile/Containerfile -> \(plan.image) (\(buildState)); \(trackedInputs). "
                     + "Use '--runtime workspace-image' to build and run it directly, or '--runtime spawn' to use spawn-managed images."
             case .spawnToml, .devcontainer, .cargo, .goMod, .cmake, .bunLock, .denoConfig, .denoLock, .pnpmLock, .yarnLock, .packageLock, .packageJSON, .fallback:
-                return "\(path.path) defines a workspace runtime -> \(plan.image) (\(buildState))"
+                return "\(path.path) defines a workspace runtime -> \(plan.image) (\(buildState)); \(trackedInputs)"
             }
         }
 
@@ -129,13 +239,13 @@ extension Spawn {
                 )
             case .devcontainerDockerfile:
                 return Check(
-                    status: .warning,
+                    status: workspaceRuntimeCacheStatus(path: path, inspection: inspection) == .ready ? .ok : .warning,
                     title: "Workspace",
                     detail: workspaceDetail(path: path, inspection: inspection, workspaceConfig: workspaceConfig)
                 )
             case .dockerfile:
                 return Check(
-                    status: .warning,
+                    status: workspaceRuntimeCacheStatus(path: path, inspection: inspection) == .ready ? .ok : .warning,
                     title: "Workspace",
                     detail: workspaceDetail(path: path, inspection: inspection, workspaceConfig: workspaceConfig)
                 )
@@ -146,6 +256,69 @@ extension Spawn {
                     detail: workspaceDetail(path: path, inspection: inspection, workspaceConfig: workspaceConfig)
                 )
             }
+        }
+
+        static func workspaceReport(
+            path: URL,
+            inspection: ToolchainDetector.Inspection,
+            workspaceConfig: WorkspaceConfig?,
+            stateDir: URL = Paths.stateDir,
+            storeRoot: URL? = nil
+        ) -> WorkspaceReport {
+            let defaults: WorkspaceDefaultsReport?
+            if workspaceConfig?.agentName != nil || workspaceConfig?.accessName != nil {
+                defaults = WorkspaceDefaultsReport(
+                    agent: workspaceConfig?.agentName,
+                    access: workspaceConfig?.accessName
+                )
+            } else {
+                defaults = nil
+            }
+
+            return WorkspaceReport(
+                path: path.path,
+                source: inspection.source.identifier,
+                detail: workspaceDetail(
+                    path: path,
+                    inspection: inspection,
+                    workspaceConfig: workspaceConfig,
+                    stateDir: stateDir,
+                    storeRoot: storeRoot
+                ),
+                defaults: defaults,
+                runtime: workspaceRuntimeReport(
+                    path: path,
+                    inspection: inspection,
+                    stateDir: stateDir,
+                    storeRoot: storeRoot
+                )
+            )
+        }
+
+        private static func report(
+            checks: [Check],
+            workspace: WorkspaceReport
+        ) -> Report {
+            Report(
+                checks: checks.map { check in
+                    CheckReport(
+                        status: check.status,
+                        title: check.title,
+                        detail: check.detail
+                    )
+                },
+                workspace: workspace
+            )
+        }
+
+        static func renderJSON(_ report: Report) throws -> String {
+            let encoder = JSONEncoder()
+            encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+            let data = try encoder.encode(report)
+            guard let string = String(data: data, encoding: .utf8) else {
+                throw SpawnError.runtimeError("Failed to encode doctor JSON output.")
+            }
+            return string
         }
 
         private static func imageCheck() -> Check {
@@ -218,19 +391,22 @@ extension Spawn {
 
         mutating func run() throws {
             try Self.validateDirectory(at: path.path)
+            let inspection = ToolchainDetector.inspect(in: path)
+            let workspaceConfig = ToolchainDetector.loadWorkspaceConfig(in: path)
+            var checks: [Check] = []
 
             do {
                 try ContainerRunner.preflight()
                 let (status, output) = try ContainerRunner.runCapture(args: ["--version"])
                 if status == 0 {
-                    Self.print(
+                    checks.append(
                         Check(
                             status: .ok,
                             title: "Container CLI",
                             detail: "\(ContainerRunner.containerPath) (\(output.trimmingCharacters(in: .whitespacesAndNewlines)))"
                         ))
                 } else {
-                    Self.print(
+                    checks.append(
                         Check(
                             status: .warning,
                             title: "Container CLI",
@@ -238,7 +414,7 @@ extension Spawn {
                         ))
                 }
             } catch {
-                Self.print(
+                checks.append(
                     Check(
                         status: .error,
                         title: "Container CLI",
@@ -246,10 +422,23 @@ extension Spawn {
                     ))
             }
 
-            Self.print(Self.imageCheck())
-            Self.print(Self.envCheck())
-            Self.print(Self.workspaceCheck(at: path))
-            for check in Self.stateChecks() {
+            checks.append(Self.imageCheck())
+            checks.append(Self.envCheck())
+            checks.append(Self.workspaceCheck(at: path))
+            checks.append(contentsOf: Self.stateChecks())
+
+            let workspace = Self.workspaceReport(
+                path: path,
+                inspection: inspection,
+                workspaceConfig: workspaceConfig
+            )
+
+            if json {
+                Swift.print(try Self.renderJSON(Self.report(checks: checks, workspace: workspace)))
+                return
+            }
+
+            for check in checks {
                 Self.print(check)
             }
         }

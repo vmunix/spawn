@@ -14,6 +14,7 @@ struct Spawn: AsyncParsableCommand {
               spawn --shell            Open a shell in the workspace container
               spawn -C ~/code/project  Run in another workspace
               spawn doctor             Check images, config, and workspace detection
+              spawn doctor --json      Emit machine-readable doctor output
 
             Common workflows:
               spawn shell <id>         Open a shell in a running container

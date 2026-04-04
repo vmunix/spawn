@@ -104,6 +104,7 @@ spawn --runtime spawn
 
 When you use `--runtime workspace-image`, spawn stores cache metadata in its state directory and reuses the built image until the tracked Dockerfile, devcontainer config, or build-context file metadata changes.
 Pass `--rebuild-workspace-image` alongside `--runtime workspace-image` to force a rebuild even when the cache is up to date.
+`spawn doctor` reports that cache state and the tracked input paths so rebuild decisions are inspectable.
 
 ## Devcontainer support
 

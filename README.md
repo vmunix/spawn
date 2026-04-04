@@ -7,6 +7,7 @@ spawn build       # build container images (once)
 spawn             # run Claude Code in current directory
 spawn -- cargo test
 spawn doctor      # check local images, config, and workspace detection
+spawn doctor --json
 ```
 
 spawn detects your project's language, picks the right container image, mounts your code, and launches the agent. Your files are read/write inside the container — everything else on your system is isolated.
@@ -79,6 +80,7 @@ spawn --shell
 
 # Check your local setup and current workspace
 spawn doctor
+spawn doctor --json
 ```
 
 ## Usage
@@ -159,6 +161,7 @@ spawn stop <id>         # stop a container
 spawn exec <id> <cmd>   # run a command in a running container
 spawn shell <id>        # open /bin/bash in a running container
 spawn doctor            # check local images, config, and workspace detection
+spawn doctor --json     # same report in machine-readable form
 ```
 
 ### Managing images
