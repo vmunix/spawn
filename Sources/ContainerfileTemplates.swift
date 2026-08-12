@@ -216,9 +216,16 @@ enum ContainerfileTemplates: Sendable {
         FROM spawn-base:latest
 
         USER root
-        RUN su - coder -c "curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y"
-        ENV PATH="/home/coder/.cargo/bin:${PATH}"
+        # Toolchains live in /opt, not $HOME: the home becomes user-owned and
+        # persistent, and 1.3G of .rustup across ~49k files makes that expensive.
+        RUN mkdir -p /opt/rust && chown -R coder:coder /opt/rust
+
         USER coder
+        ENV RUSTUP_HOME=/opt/rust/rustup CARGO_HOME=/opt/rust/cargo
+        # --no-modify-path: PATH comes from ENV below, not from ~/.bashrc.
+        RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \\
+            | sh -s -- -y --no-modify-path
+        ENV PATH="/opt/rust/cargo/bin:${PATH}"
         """
 
     static let go = """

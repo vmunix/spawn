@@ -23,6 +23,20 @@ import Testing
     #expect(content.contains("rustup"))
 }
 
+@Test func rustToolchainLivesOutsideHome() {
+    let content = ContainerfileTemplates.content(for: .rust)
+    #expect(content.contains("RUSTUP_HOME=/opt/rust/rustup"))
+    #expect(content.contains("CARGO_HOME=/opt/rust/cargo"))
+    #expect(content.contains("/opt/rust/cargo/bin"))
+    #expect(!content.contains("/home/coder/.cargo"), "rust must not put cargo in the home")
+}
+
+@Test func rustInstallerDoesNotEditShellRcFiles() {
+    // rustup appends to ~/.bashrc and ~/.profile unless told not to; those edits are
+    // toolchain state in a file the home will own and share across toolchains.
+    #expect(ContainerfileTemplates.content(for: .rust).contains("--no-modify-path"))
+}
+
 @Test func goContainerfileExtendsBase() {
     let content = ContainerfileTemplates.content(for: .go)
     #expect(content.contains("FROM spawn-base:latest"))
