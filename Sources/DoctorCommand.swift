@@ -455,10 +455,11 @@ extension Spawn {
 
         /// Reports the named `container` volumes that hold a toolchain's build caches.
         ///
-        /// The caches deliberately live outside both the image and `/home/coder`, so
-        /// nothing in a workspace or a home reveals them. Naming them here is what
-        /// makes them inspectable (`container volume ls`) and removable
-        /// (`container volume delete <name>`).
+        /// The caches deliberately live outside the image, and off every path spawn
+        /// seeds into a home, so nothing in a workspace or a home reveals them —
+        /// even the one that mounts inside the home (npm's `$HOME/.npm`). Naming
+        /// them here is what makes them inspectable (`container volume ls`) and
+        /// removable (`container volume delete <name>`).
         ///
         /// `exists` is the `CacheVolumeOperations` seam, injected so the check stays
         /// pure and unit-testable. A volume that has not been created yet is normal

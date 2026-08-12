@@ -294,7 +294,7 @@ extension Spawn {
                 cpus: cpus,
                 memory: memory,
                 cacheVolumes: ContainerRunner.prepareCacheVolumes(
-                    CacheVolumes.forToolchain(resolvedToolchain),
+                    CacheVolumes.forRun(toolchain: resolvedToolchain, imageOverride: image),
                     // The spawn-managed image for the toolchain, never
                     // `resolvedImage`: preparation is the one place spawn runs a
                     // container as root, so it must not run a `--image` override.

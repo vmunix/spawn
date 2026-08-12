@@ -83,6 +83,10 @@ RunCommand.run()
   → ImageResolver.resolve()       # Map toolchain to image name for spawn-managed runtimes
   → MountResolver.resolve()       # Build mount list
   → EnvLoader.load/loadDefault()  # Load env vars
+  → ContainerRunner.prepareCacheVolumes()
+                                  # Create and chown missing build-cache volumes
+                                  # (skipped for --image; the only step that boots
+                                  # a container as root)
   → ContainerRunner.run()         # Launch container
 ```
 

@@ -3,7 +3,7 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SPAWN_BIN="${ROOT}/.build/release/spawn"
-CONTAINER_BIN="${CONTAINER_BIN:-container}"
+CONTAINER_BIN="${CONTAINER_BIN:-${CONTAINER_PATH:-container}}"
 
 section() {
   printf '=== %s ===\n' "$1"
@@ -89,7 +89,7 @@ expect_contains "${REPLY}" "session: command (cargo, 1 arg)" "rust passthrough l
 
 run_and_capture "Go fixture: explicit workspace + access profile" \
   "${SPAWN_BIN}" -C "${ROOT}/fixtures/go-sample" --access minimal -- /bin/bash -lc \
-  'test ! -e /home/coder/.ssh && test ! -e /home/coder/.config/gh/hosts.yml && go version && go build ./... && go test -v ./... && echo "PASS: go-sample"'
+  'test ! -e /home/coder/.ssh && test ! -e /home/coder/.config/gh/hosts.yml && go version && go build ./... && go test -v ./... && echo "PASS: go-sample" && test -w /opt/go/pkg/mod && touch /opt/go/pkg/sumdb-probe'
 expect_contains "${REPLY}" "access: minimal" "go access profile"
 expect_contains "${REPLY}" "PASS: go-sample" "go fixture output"
 
@@ -156,14 +156,24 @@ section "Toolchain images keep /home/coder identical to base"
 # anything to /home/coder. If this fails, a toolchain is leaking into the home,
 # which mixes build state with user state and makes the home expensive to copy.
 #
-# Compare the sorted path listings, not file counts: the base home is built
-# largely from symlinks (.claude.json, .gitconfig) and directories
-# (.claude-state, .gitconfig-dir, .local/bin), so counting only `-type f`
-# would wave through a compatibility symlink such as
+# Compare sorted listings of every entry plus the content of every file, not
+# file counts: the base home is built largely from symlinks (.claude.json,
+# .gitconfig) and directories (.claude-state, .gitconfig-dir, .local/bin), so
+# counting only `-type f` would wave through a compatibility symlink such as
 # `ln -s /opt/rust/cargo /home/coder/.cargo`, a directory-only leak, or a
 # one-added-one-removed swap.
+#
+# The listing carries type and symlink target (`%y %l`) as well as the path, so
+# a retargeted symlink is caught even though `.claude.json` is dangling and thus
+# invisible to `-type f`; the md5sums catch a same-path content change, such as
+# a `.bashrc` that regained the bun/deno installer's `export` lines because the
+# `/etc/skel` restore moved above the installers. `find -printf` is GNU find,
+# which is what these Ubuntu images ship — this runs inside the container.
 home_listing() {
-  "${CONTAINER_BIN}" run --rm "$1" /bin/sh -c 'find /home/coder -mindepth 1 | LC_ALL=C sort'
+  "${CONTAINER_BIN}" run --rm "$1" /bin/sh -c '
+    find /home/coder -mindepth 1 -printf "%p %y %l\n" | LC_ALL=C sort
+    find /home/coder -type f -exec md5sum {} + | LC_ALL=C sort
+  '
 }
 
 base_home_listing="$(home_listing spawn-base:latest)"
@@ -178,10 +188,12 @@ for toolchain in cpp rust go js; do
   if [[ "${toolchain_home_listing}" != "${base_home_listing}" ]]; then
     printf 'differences under /home/coder ("<" only in spawn-%s, ">" only in spawn-base):\n' "${toolchain}" >&2
     diff <(printf '%s\n' "${toolchain_home_listing}") <(printf '%s\n' "${base_home_listing}") >&2 || true
-    fail "spawn-${toolchain} does not keep /home/coder identical to spawn-base: toolchains must live under /opt, not in the home"
+    fail "spawn-${toolchain} does not keep /home/coder identical to spawn-base: toolchains must live under /opt, not in the home — or, if the differences are only timestamped names (.claude/backups, .npm/_logs), the images were built from different spawn-base layers, so rebuild all images with 'spawn build'"
   fi
 done
-printf 'PASS: all toolchain images keep /home/coder identical to base (%s entries)\n\n' \
-  "$(printf '%s\n' "${base_home_listing}" | wc -l | tr -d '[:space:]')"
+# Entry lines start with the path; md5sum lines start with a hash, so counting
+# the former reports entries rather than entries-plus-checksums.
+printf 'PASS: all toolchain images keep /home/coder identical to base (%s entries, contents included)\n\n' \
+  "$(printf '%s\n' "${base_home_listing}" | grep -c '^/home/coder' | tr -d '[:space:]')"
 
 printf '=== All smoke tests passed ===\n'

@@ -34,6 +34,30 @@ import Testing
     #expect(CacheVolumes.forToolchain(.rust) == CacheVolumes.forToolchain(.rust))
 }
 
+@Test func anImageOverrideGetsNoCacheVolumes() {
+    // Detection still reports a toolchain for `spawn --image ghcr.io/foo/bar` in
+    // a Cargo workspace, but spawn does not build that image and cannot know its
+    // layout: mounting /opt/rust/cargo/{registry,git} into it would shadow
+    // whatever lives there, and creating the volumes would cost a
+    // create-and-roll-back on every run for a cache nothing ever populates.
+    #expect(CacheVolumes.forRun(toolchain: .rust, imageOverride: "ghcr.io/foo/bar").isEmpty)
+    for toolchain in Toolchain.allCases {
+        #expect(CacheVolumes.forRun(toolchain: toolchain, imageOverride: "custom:latest").isEmpty)
+    }
+}
+
+@Test func aRunWithoutAnImageOverrideGetsTheToolchainCaches() {
+    // The guard above must subtract only the override case, or spawn-managed
+    // runs would silently stop caching.
+    for toolchain in Toolchain.allCases {
+        #expect(
+            CacheVolumes.forRun(toolchain: toolchain, imageOverride: nil)
+                == CacheVolumes.forToolchain(toolchain)
+        )
+    }
+    #expect(!CacheVolumes.forRun(toolchain: .rust, imageOverride: nil).isEmpty)
+}
+
 @Test func cacheVolumeNamesAreUniqueAcrossToolchains() {
     let all = Toolchain.allCases.flatMap { CacheVolumes.forToolchain($0) }
     let names = all.map(\.name)

@@ -60,7 +60,7 @@ Language toolchains are installed under `/opt`, never in the container's home:
 | `js` | `/opt/js` | `BUN_INSTALL=/opt/js/bun`, `DENO_INSTALL=/opt/js/deno`, `DENO_DIR=/opt/js/deno-cache` |
 | `cpp` | system paths (apt) | -- |
 
-`/home/coder` therefore holds user state only: a toolchain image adds nothing to it, and its contents stay identical to `spawn-base:latest`. `make smoke` enforces that -- it counts the files under `/home/coder` in each image and fails if a toolchain image differs from base.
+`/home/coder` therefore holds user state only: a toolchain image adds nothing to it, and its contents stay identical to `spawn-base:latest`. `make smoke` enforces that -- it lists every entry under `/home/coder` in each image with its type and symlink target, checksums every file, and fails if a toolchain image differs from base in either the entries it has or the content of any file.
 
 All of these are already on `PATH` inside the container, so no setup is needed. If you hardcoded the old locations (`/home/coder/.cargo`, `/home/coder/.rustup`, `/home/coder/go`, `/home/coder/.bun`, `/home/coder/.deno`) in a script or in `.spawn.toml`, point them at the `/opt` paths above.
 
@@ -88,17 +88,19 @@ container volume ls                                  # inspect
 container volume delete spawn-cache-cargo-registry   # clear one
 ```
 
+Deleting is also the recovery path if a volume was left unprepared: if a build fails with "permission denied" writing a cache path, run `container volume delete spawn-cache-<name>` and rerun -- spawn recreates the volume and hands it to the `coder` user again.
+
 ### Upgrading existing images
 
-The `go` image layout changed: it now pre-creates a coder-owned `/opt/go/pkg/mod` so the module-cache volume does not leave `/opt/go/pkg` root-owned, which would stop `go` from writing its sibling `sumdb` directory.
+Toolchains moved out of `/home/coder` into `/opt` in this release, and the cache volumes mount at the new `/opt` paths. An image built before the move still sets the old locations -- or, for `go`, no `GOPATH` at all -- so the volumes mount onto paths that image never reads.
 
-spawn cannot detect an image built before that change. **If you already have a `spawn-go:latest`, rebuild it once:**
+spawn cannot detect this: it only warns when a toolchain image is older than `spawn-base:latest`, which this change did not touch. **After upgrading spawn, rebuild every image once:**
 
 ```bash
-spawn build go
+spawn build
 ```
 
-Without the rebuild, Go commands fail with permission errors when writing the module cache.
+Without the rebuild nothing fails loudly -- and that is the hazard. spawn still creates, prepares and mounts the `spawn-cache-*` volumes, and `spawn doctor` still lists them as present, but a stale image leaves `CARGO_HOME`/`DENO_DIR` unset, so `cargo` and `deno` keep writing to their old in-home paths and nothing lands in the volumes -- and a stale `go` image, which never set `GOPATH`, does not persist its module cache at all. You are told the cache is on while nothing accumulates in it. (`npm` is unaffected: its `$HOME/.npm` location did not change.)
 
 ## Overriding detection
 

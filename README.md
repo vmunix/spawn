@@ -178,7 +178,7 @@ Omit the toolchain to build all images. Base is built first since other images d
 
 Language toolchains are installed under `/opt` (`/opt/rust`, `/opt/go`, `/opt/js`), never in the container's `/home/coder`. The home holds user state only.
 
-> **Upgrading:** the `go` image layout changed — it now pre-creates the coder-owned `/opt/go/pkg/mod` that the module-cache volume mounts onto. spawn cannot detect an image built before that change, so if you already have a `spawn-go:latest`, rebuild it once with `spawn build go`. Without the rebuild, `go` commands fail to write the module cache. If you hardcoded `/home/coder/.cargo` or `/home/coder/go` in a script or `.spawn.toml`, update those paths to `/opt/rust/cargo` and `/opt/go`.
+> **Upgrading:** toolchains moved out of `/home/coder` into `/opt`, and the build caches mount at the new `/opt` paths. spawn cannot detect an image built before the move, so rebuild every image once with `spawn build`. Without the rebuild nothing fails loudly: spawn still creates and mounts the cache volumes and `spawn doctor` still lists them, but a stale image writes to the old in-home paths, so the caches stay empty — and a stale `spawn-go:latest`, which never set `GOPATH`, does not persist its module cache at all. If you hardcoded `/home/coder/.cargo` or `/home/coder/go` in a script or `.spawn.toml`, update those paths to `/opt/rust/cargo` and `/opt/go`.
 
 ### Build caches
 

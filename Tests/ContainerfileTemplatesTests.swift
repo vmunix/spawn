@@ -121,6 +121,23 @@ import Testing
     #expect(content.contains("/etc/skel/.profile"))
 }
 
+@Test func jsTemplateRestoresShellRcFilesAfterBothInstallers() {
+    // Presence alone is not enough: a restore that ran *before* the installers
+    // would leave the installers' `export BUN_INSTALL=` / `. "/opt/js/deno/env"`
+    // lines in .bashrc, changing the home's content while its paths stay
+    // identical to base's.
+    let content = ContainerfileTemplates.content(for: .js)
+    guard let bun = content.range(of: "bun.sh/install")?.lowerBound,
+        let deno = content.range(of: "deno.land/install.sh")?.lowerBound,
+        let restore = content.range(of: "cp /etc/skel/.bashrc")?.lowerBound
+    else {
+        Issue.record("Expected both installers and the /etc/skel restore in the js template")
+        return
+    }
+    #expect(bun < restore)
+    #expect(deno < restore)
+}
+
 @Test func jsTemplateInstallsUnzipBeforeBun() {
     // Verified: the bun installer exits 1 without unzip. Anchor on the actual
     // apt-get invocation, not the bare word "unzip" — that word also appears

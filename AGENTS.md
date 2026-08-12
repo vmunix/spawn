@@ -124,7 +124,7 @@ Do not broaden default secret exposure casually. The current direction is explic
 - Single-file bind mounts are avoided where VirtioFS rename behavior is problematic
 - Embedded `ContainerfileTemplates.swift` keeps `spawn build` self-contained after installation
 - Language toolchains live under `/opt` (`/opt/rust`, `/opt/go`, `/opt/js`), never in `/home/coder`
-- Toolchain images must keep `/home/coder` identical to `spawn-base`'s; `scripts/smoke.sh` compares the file counts and fails if a toolchain leaks into the home
+- Toolchain images must keep `/home/coder` identical to `spawn-base`'s; `scripts/smoke.sh` compares each image's full home listing — every entry with its type and symlink target, plus a checksum of every file — and fails if a toolchain leaks into the home or changes a file already there
 - Build caches are named `container` volumes mounted at run time, never baked into an image (see `Sources/CacheVolumes.swift`)
 - `ContainerfileTemplates.swift` is the only source of Containerfile content; `spawn build` is the only supported way to build spawn-managed images
 
