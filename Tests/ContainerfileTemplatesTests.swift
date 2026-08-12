@@ -102,9 +102,12 @@ import Testing
 }
 
 @Test func jsTemplateInstallsUnzipBeforeBun() {
-    // Verified: the bun installer exits 1 without unzip.
+    // Verified: the bun installer exits 1 without unzip. Anchor on the actual
+    // apt-get invocation, not the bare word "unzip" — that word also appears
+    // in the explanatory comment above it, which would let a dropped package
+    // pass silently if we matched on it.
     let content = ContainerfileTemplates.content(for: .js)
-    guard let unzip = content.range(of: "unzip")?.lowerBound,
+    guard let unzip = content.range(of: "install -y --no-install-recommends unzip")?.lowerBound,
         let bun = content.range(of: "bun.sh/install")?.lowerBound
     else {
         Issue.record("Expected both unzip and the bun installer in the js template")
