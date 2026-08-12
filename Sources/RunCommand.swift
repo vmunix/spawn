@@ -292,7 +292,11 @@ extension Spawn {
                 workdir: workdir,
                 entrypoint: entrypoint,
                 cpus: cpus,
-                memory: memory
+                memory: memory,
+                cacheVolumes: ContainerRunner.prepareCacheVolumes(
+                    CacheVolumes.forToolchain(resolvedToolchain),
+                    image: resolvedImage
+                )
             )
 
             if status != 0 {

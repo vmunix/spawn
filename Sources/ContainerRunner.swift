@@ -93,7 +93,8 @@ enum ContainerRunner: Sendable {
         workdir: String,
         entrypoint: [String],
         cpus: Int,
-        memory: String
+        memory: String,
+        cacheVolumes: [CacheVolume] = []
     ) -> [String] {
         var args = ["run", "--rm", "-i"]
 
@@ -117,6 +118,11 @@ enum ContainerRunner: Sendable {
             args += ["--volume", spec]
         }
 
+        // Named cache volumes. `container` creates a missing volume on first use.
+        for volume in cacheVolumes {
+            args += ["--volume", "\(volume.name):\(volume.guestPath)"]
+        }
+
         // Environment (sorted for deterministic output)
         for (key, value) in env.sorted(by: { $0.key < $1.key }) {
             args += ["--env", "\(key)=\(value)"]
@@ -134,6 +140,63 @@ enum ContainerRunner: Sendable {
         return args
     }
 
+    /// Create any missing cache volumes and hand them to the guest user.
+    ///
+    /// A newly created named volume is root-owned, so the guest user cannot write
+    /// into it. Volumes are chowned once, at creation, from a throwaway root
+    /// container; an already-existing volume was prepared by an earlier run.
+    ///
+    /// - Returns: the volumes safe to mount. A volume that could not be prepared
+    ///   is dropped rather than mounted, so a run degrades to "no cache" instead
+    ///   of failing every build with permission errors.
+    static func prepareCacheVolumes(_ volumes: [CacheVolume], image: String) -> [CacheVolume] {
+        guard !volumes.isEmpty else { return [] }
+
+        let missing = volumes.filter { !volumeExists($0.name) }
+        guard !missing.isEmpty else { return volumes }
+
+        var created: [CacheVolume] = []
+        for volume in missing {
+            guard let status = try? runQuiet(args: ["volume", "create", volume.name]), status == 0 else {
+                logger.warning("Could not create cache volume \(volume.name); continuing without it")
+                return volumes.filter { !missing.contains($0) }
+            }
+            created.append(volume)
+        }
+
+        let chownArgs = CacheVolumePreparation.chownArgs(image: image, volumes: created)
+        guard let status = try? runQuiet(args: chownArgs), status == 0 else {
+            logger.warning(
+                "Could not hand cache volumes to the guest user; continuing without them"
+            )
+            return volumes.filter { !missing.contains($0) }
+        }
+
+        return volumes
+    }
+
+    /// Whether a named volume already exists.
+    private static func volumeExists(_ name: String) -> Bool {
+        guard let status = try? runQuiet(args: ["volume", "inspect", name]) else { return false }
+        return status == 0
+    }
+
+    /// Run the container CLI with output discarded, returning the exit status.
+    private static func runQuiet(args: [String]) throws -> Int32 {
+        try preflight()
+        let binary = try resolvedContainerPath()
+
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: binary)
+        process.arguments = args
+        process.standardInput = FileHandle.nullDevice
+        process.standardOutput = FileHandle.nullDevice
+        process.standardError = FileHandle.nullDevice
+        try process.run()
+        process.waitUntilExit()
+        return process.terminationStatus
+    }
+
     /// Launch a container. Uses `execv` when stdin is a TTY (for direct terminal access),
     /// falls back to `Foundation.Process` with signal forwarding otherwise.
     static func run(
@@ -143,7 +206,8 @@ enum ContainerRunner: Sendable {
         workdir: String,
         entrypoint: [String],
         cpus: Int,
-        memory: String
+        memory: String,
+        cacheVolumes: [CacheVolume] = []
     ) throws -> Int32 {
         try preflight()
         let binary = try resolvedContainerPath()
@@ -151,7 +215,8 @@ enum ContainerRunner: Sendable {
         let args = buildArgs(
             image: image, mounts: mounts, env: env,
             workdir: workdir, entrypoint: entrypoint,
-            cpus: cpus, memory: memory
+            cpus: cpus, memory: memory,
+            cacheVolumes: cacheVolumes
         )
 
         let cmd = ([binary] + sanitizeForLogging(args)).joined(separator: " ")

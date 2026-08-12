@@ -100,6 +100,69 @@ import Testing
     #expect(!envArgs.contains("SPAWN_SAFE_MODE=1"))
 }
 
+// MARK: - Cache volume tests
+
+@Test func buildArgsEmitsCacheVolumes() {
+    let args = ContainerRunner.buildArgs(
+        image: "spawn-rust:latest",
+        mounts: [],
+        env: [:],
+        workdir: "/workspace",
+        entrypoint: ["true"],
+        cpus: 4,
+        memory: "8g",
+        cacheVolumes: [CacheVolume(name: "spawn-cache-cargo-registry", guestPath: "/opt/rust/cargo/registry")]
+    )
+
+    #expect(args.contains("spawn-cache-cargo-registry:/opt/rust/cargo/registry"))
+    // The spec must be carried by a `--volume` flag, not merely present somewhere.
+    let volumeSpecs = zip(args, args.dropFirst()).filter { $0.0 == "--volume" }.map(\.1)
+    #expect(volumeSpecs == ["spawn-cache-cargo-registry:/opt/rust/cargo/registry"])
+}
+
+@Test func buildArgsEmitsCacheVolumesAlongsideMounts() {
+    let args = ContainerRunner.buildArgs(
+        image: "spawn-rust:latest",
+        mounts: [Mount(hostPath: "/code/project", readOnly: false)],
+        env: [:],
+        workdir: "/workspace/project",
+        entrypoint: ["true"],
+        cpus: 4,
+        memory: "8g",
+        cacheVolumes: [
+            CacheVolume(name: "spawn-cache-cargo-registry", guestPath: "/opt/rust/cargo/registry"),
+            CacheVolume(name: "spawn-cache-cargo-git", guestPath: "/opt/rust/cargo/git"),
+        ]
+    )
+
+    let volumeSpecs = zip(args, args.dropFirst()).filter { $0.0 == "--volume" }.map(\.1)
+    #expect(
+        volumeSpecs == [
+            "/code/project:/workspace/project",
+            "spawn-cache-cargo-registry:/opt/rust/cargo/registry",
+            "spawn-cache-cargo-git:/opt/rust/cargo/git",
+        ]
+    )
+    // Cache volumes are named volumes, never `:ro`.
+    #expect(!volumeSpecs.contains { $0.hasPrefix("spawn-cache-") && $0.hasSuffix(":ro") })
+}
+
+@Test func buildArgsWithNoCacheVolumesIsUnchanged() {
+    let args = ContainerRunner.buildArgs(
+        image: "spawn-base:latest",
+        mounts: [],
+        env: [:],
+        workdir: "/workspace",
+        entrypoint: ["true"],
+        cpus: 4,
+        memory: "8g",
+        cacheVolumes: []
+    )
+
+    #expect(!args.contains { $0.hasPrefix("spawn-cache-") })
+    #expect(!args.contains("--volume"))
+}
+
 // MARK: - Preflight tests
 
 @Test func preflightThrowsForMissingBinary() throws {

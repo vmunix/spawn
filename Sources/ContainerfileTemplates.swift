@@ -235,7 +235,11 @@ enum ContainerfileTemplates: Sendable {
         RUN curl -fsSL "https://go.dev/dl/go\(goVersion).linux-\(goArch).tar.gz" | tar -C /usr/local -xz
         # GOPATH in /opt, not $HOME — `go install` and GOMODCACHE would otherwise
         # fill the user's persistent home with build artifacts.
-        RUN mkdir -p /opt/go && chown -R coder:coder /opt/go
+        # The module cache path is created here, coder-owned: mounting a cache
+        # volume at /opt/go/pkg/mod otherwise makes the runtime create the
+        # intermediate /opt/go/pkg root-owned, and go can then no longer write
+        # its sibling /opt/go/pkg/sumdb.
+        RUN mkdir -p /opt/go/pkg/mod && chown -R coder:coder /opt/go
 
         USER coder
         ENV GOPATH=/opt/go

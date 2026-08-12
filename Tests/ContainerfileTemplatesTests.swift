@@ -68,6 +68,19 @@ import Testing
     #expect(!content.contains("/home/coder/go"), "GOPATH must not be in the home")
 }
 
+@Test func goPreCreatesModuleCacheMountPoint() {
+    let content = ContainerfileTemplates.content(for: .go)
+    // Anchored on the RUN line: a cache volume mounted at /opt/go/pkg/mod makes
+    // the runtime create /opt/go/pkg root-owned unless the image owns it first.
+    #expect(content.contains("RUN mkdir -p /opt/go/pkg/mod && chown -R coder:coder /opt/go"))
+
+    guard let mountPoint = CacheVolumes.forToolchain(.go).first?.guestPath else {
+        Issue.record("go toolchain declares no cache volume")
+        return
+    }
+    #expect(content.contains("mkdir -p \(mountPoint)"))
+}
+
 @Test func jsContainerfileExtendsBase() {
     let content = ContainerfileTemplates.content(for: .js)
     #expect(content.contains("FROM spawn-base:latest"))
