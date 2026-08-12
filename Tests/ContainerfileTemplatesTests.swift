@@ -78,3 +78,37 @@ import Testing
     #expect(content.contains("nodejs.org/download/release/v22.22.1"))
     #expect(content.contains("linux-arm64") || content.contains("linux-x64"))
 }
+
+@Test func jsToolchainsLiveOutsideHome() {
+    let content = ContainerfileTemplates.content(for: .js)
+    #expect(content.contains("BUN_INSTALL=/opt/js/bun"))
+    #expect(content.contains("DENO_INSTALL=/opt/js/deno"))
+    #expect(content.contains("/opt/js/bun/bin"))
+    #expect(content.contains("/opt/js/deno/bin"))
+    #expect(!content.contains("/home/coder/.bun"), "bun must not live in the home")
+    #expect(!content.contains("/home/coder/.deno"), "deno must not live in the home")
+}
+
+@Test func denoCacheLivesOutsideHome() {
+    // Verified: deno writes ~/.cache/deno (dep analysis, v8 cache, fetched modules).
+    #expect(ContainerfileTemplates.content(for: .js).contains("DENO_DIR=/opt/js/deno-cache"))
+}
+
+@Test func jsTemplateRestoresShellRcFiles() {
+    // The bun/deno installers append to .bashrc/.profile; PATH comes from ENV instead.
+    let content = ContainerfileTemplates.content(for: .js)
+    #expect(content.contains("/etc/skel/.bashrc"))
+    #expect(content.contains("/etc/skel/.profile"))
+}
+
+@Test func jsTemplateInstallsUnzipBeforeBun() {
+    // Verified: the bun installer exits 1 without unzip.
+    let content = ContainerfileTemplates.content(for: .js)
+    guard let unzip = content.range(of: "unzip")?.lowerBound,
+        let bun = content.range(of: "bun.sh/install")?.lowerBound
+    else {
+        Issue.record("Expected both unzip and the bun installer in the js template")
+        return
+    }
+    #expect(unzip < bun)
+}

@@ -242,6 +242,7 @@ enum ContainerfileTemplates: Sendable {
 
         USER root
 
+        # unzip is required by the bun installer — it exits 1 without it.
         RUN apt-get update && apt-get install -y --no-install-recommends unzip \\
             && rm -rf /var/lib/apt/lists/*
 
@@ -252,14 +253,23 @@ enum ContainerfileTemplates: Sendable {
         # Corepack gives first-class pnpm/yarn support for Node projects.
         RUN corepack enable
 
+        # Toolchains live in /opt, not $HOME — see the rust template.
+        RUN mkdir -p /opt/js && chown -R coder:coder /opt/js
+
         USER coder
+        ENV BUN_INSTALL=/opt/js/bun DENO_INSTALL=/opt/js/deno DENO_DIR=/opt/js/deno-cache
 
         # Bun
         RUN curl -fsSL https://bun.sh/install | bash -s "bun-v\(bunVersion)"
 
         # Deno
-        RUN curl -fsSL https://deno.land/install.sh | sh
+        RUN curl -fsSL https://deno.land/install.sh | sh -s -- -y
 
-        ENV PATH="/home/coder/.bun/bin:/home/coder/.deno/bin:${PATH}"
+        # Both installers append PATH lines to the shell rc files. PATH comes from
+        # ENV below, and the home must stay identical to spawn-base's, so revert them.
+        RUN cp /etc/skel/.bashrc /home/coder/.bashrc \\
+            && cp /etc/skel/.profile /home/coder/.profile
+
+        ENV PATH="/opt/js/bun/bin:/opt/js/deno/bin:${PATH}"
         """
 }
