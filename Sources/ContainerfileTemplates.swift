@@ -233,8 +233,13 @@ enum ContainerfileTemplates: Sendable {
 
         USER root
         RUN curl -fsSL "https://go.dev/dl/go\(goVersion).linux-\(goArch).tar.gz" | tar -C /usr/local -xz
-        ENV PATH="/usr/local/go/bin:/home/coder/go/bin:${PATH}"
+        # GOPATH in /opt, not $HOME — `go install` and GOMODCACHE would otherwise
+        # fill the user's persistent home with build artifacts.
+        RUN mkdir -p /opt/go && chown -R coder:coder /opt/go
+
         USER coder
+        ENV GOPATH=/opt/go
+        ENV PATH="/usr/local/go/bin:/opt/go/bin:${PATH}"
         """
 
     static let js = """

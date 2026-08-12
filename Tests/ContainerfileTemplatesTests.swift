@@ -61,6 +61,13 @@ import Testing
     #expect(!content.contains("ARG GO_VERSION"))
 }
 
+@Test func goWorkspaceLivesOutsideHome() {
+    let content = ContainerfileTemplates.content(for: .go)
+    #expect(content.contains("GOPATH=/opt/go"))
+    #expect(content.contains("/opt/go/bin"))
+    #expect(!content.contains("/home/coder/go"), "GOPATH must not be in the home")
+}
+
 @Test func jsContainerfileExtendsBase() {
     let content = ContainerfileTemplates.content(for: .js)
     #expect(content.contains("FROM spawn-base:latest"))
