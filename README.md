@@ -176,6 +176,28 @@ Omit the toolchain to build all images. Base is built first since other images d
 | `--cpus <n>` | CPU cores for the builder container (default: 4) |
 | `--memory <size>` | Builder container memory (default: 8g) |
 
+Language toolchains are installed under `/opt` (`/opt/rust`, `/opt/go`, `/opt/js`), never in the container's `/home/coder`. The home holds user state only.
+
+> **Upgrading:** the `go` image layout changed — it now pre-creates the coder-owned `/opt/go/pkg/mod` that the module-cache volume mounts onto. spawn cannot detect an image built before that change, so if you already have a `spawn-go:latest`, rebuild it once with `spawn build go`. Without the rebuild, `go` commands fail to write the module cache. If you hardcoded `/home/coder/.cargo` or `/home/coder/go` in a script or `.spawn.toml`, update those paths to `/opt/rust/cargo` and `/opt/go`.
+
+### Build caches
+
+Build caches persist automatically in named `container` volumes, mounted at run time, so downloads survive between runs without being baked into the image:
+
+| Toolchain | Volumes | Guest path |
+|-----------|---------|------------|
+| `rust` | `spawn-cache-cargo-registry`, `spawn-cache-cargo-git` | `/opt/rust/cargo/registry`, `/opt/rust/cargo/git` |
+| `go` | `spawn-cache-go-mod` | `/opt/go/pkg/mod` |
+| `js` | `spawn-cache-deno`, `spawn-cache-npm` | `/opt/js/deno-cache`, `/home/coder/.npm` |
+| `base`, `cpp` | *(none)* | |
+
+spawn creates and mounts them on demand. `spawn doctor` lists the volumes for the detected toolchain. There is no `spawn cache` command; clear a cache with the `container` CLI, which recreates it empty on the next run:
+
+```bash
+container volume ls
+container volume delete spawn-cache-cargo-registry
+```
+
 ### Managing containers
 
 ```bash

@@ -123,6 +123,10 @@ Do not broaden default secret exposure casually. The current direction is explic
 - Agent auth state is persisted under `~/.local/state/spawn/<agent>/`
 - Single-file bind mounts are avoided where VirtioFS rename behavior is problematic
 - Embedded `ContainerfileTemplates.swift` keeps `spawn build` self-contained after installation
+- Language toolchains live under `/opt` (`/opt/rust`, `/opt/go`, `/opt/js`), never in `/home/coder`
+- Toolchain images must keep `/home/coder` identical to `spawn-base`'s; `scripts/smoke.sh` compares the file counts and fails if a toolchain leaks into the home
+- Build caches are named `container` volumes mounted at run time, never baked into an image (see `Sources/CacheVolumes.swift`)
+- `ContainerfileTemplates.swift` is the only source of Containerfile content; `spawn build` is the only supported way to build spawn-managed images
 
 ## Testing
 
@@ -152,6 +156,7 @@ Key files:
 - `Sources/MountResolver.swift`: workspace/auth/agent mounts
 - `Sources/ContainerRunner.swift`: container CLI boundary
 - `Sources/BuildCommand.swift`: spawn-managed image builds
+- `Sources/CacheVolumes.swift`: per-toolchain build-cache volume names, guest paths, and preparation
 - `Sources/DevcontainerParser.swift`: devcontainer parsing
 - `Sources/Types.swift`: `Toolchain`, `AccessProfile`, `RuntimeMode`, `AgentProfile`, `Mount`
 

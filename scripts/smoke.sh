@@ -3,6 +3,7 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SPAWN_BIN="${ROOT}/.build/release/spawn"
+CONTAINER_BIN="${CONTAINER_BIN:-container}"
 
 section() {
   printf '=== %s ===\n' "$1"
@@ -79,6 +80,8 @@ run_and_capture "Doctor JSON reports workspace defaults" "${SPAWN_BIN}" doctor "
 expect_regex "${REPLY}" '"source"[[:space:]]*:[[:space:]]*"spawn-toml"' "rust doctor source"
 expect_regex "${REPLY}" '"agent"[[:space:]]*:[[:space:]]*"codex"' "rust doctor agent default"
 expect_regex "${REPLY}" '"access"[[:space:]]*:[[:space:]]*"minimal"' "rust doctor access default"
+expect_contains "${REPLY}" "spawn-cache-cargo-registry" "rust doctor cache volumes"
+expect_contains "${REPLY}" "spawn-cache-cargo-git" "rust doctor cache volumes"
 
 run_and_capture "Rust fixture: cwd default + passthrough command" \
   /bin/bash -lc "cd \"${ROOT}/fixtures/rust-sample\" && \"${SPAWN_BIN}\" -- cargo test"
@@ -147,5 +150,25 @@ run_and_capture "Doctor JSON reports devcontainer workspace-image cache" \
   "${SPAWN_BIN}" doctor "${ROOT}/fixtures/devcontainer-sample" --json
 expect_regex "${REPLY}" '"source"[[:space:]]*:[[:space:]]*"devcontainer-dockerfile"' "devcontainer doctor source"
 expect_regex "${REPLY}" '"cacheStatus"[[:space:]]*:[[:space:]]*"ready"' "devcontainer doctor cache"
+
+section "Toolchain images keep /home/coder identical to base"
+# The invariant this slice exists to establish: a toolchain image must not add
+# anything to /home/coder. If this fails, a toolchain is leaking into the home,
+# which mixes build state with user state and makes the home expensive to copy.
+home_file_count() {
+  "${CONTAINER_BIN}" run --rm "$1" /bin/sh -c 'find /home/coder -type f | wc -l' | tr -d '[:space:]'
+}
+
+base_home_count="$(home_file_count spawn-base:latest)"
+[[ "${base_home_count}" =~ ^[1-9][0-9]*$ ]] \
+  || fail "could not count files under /home/coder in spawn-base:latest (got '${base_home_count}')"
+
+for toolchain in cpp rust go js; do
+  toolchain_home_count="$(home_file_count "spawn-${toolchain}:latest")"
+  if [[ "${toolchain_home_count}" != "${base_home_count}" ]]; then
+    fail "spawn-${toolchain} has ${toolchain_home_count} files under /home/coder, spawn-base has ${base_home_count}: toolchains must live under /opt, not in the home"
+  fi
+done
+printf 'PASS: all toolchain images keep /home/coder identical to base (%s files)\n\n' "${base_home_count}"
 
 printf '=== All smoke tests passed ===\n'

@@ -276,6 +276,34 @@ import Testing
     #expect(report.runtime?.cacheRecordPath == plan.cacheRecord.path)
 }
 
+@Test func doctorReportsCacheVolumes() {
+    let check = Spawn.Doctor.cacheVolumeCheck(
+        toolchain: .rust,
+        volumes: CacheVolumes.forToolchain(.rust)
+    )
+
+    #expect(check.status == .ok)
+    #expect(check.title == "Cache volumes")
+    #expect(check.detail == "rust: spawn-cache-cargo-registry, spawn-cache-cargo-git")
+}
+
+@Test func doctorNamesEveryCacheVolumeOfAToolchain() {
+    for toolchain in Toolchain.allCases {
+        let volumes = CacheVolumes.forToolchain(toolchain)
+        let check = Spawn.Doctor.cacheVolumeCheck(toolchain: toolchain, volumes: volumes)
+        for volume in volumes {
+            #expect(check.detail.contains(volume.name))
+        }
+    }
+}
+
+@Test func doctorReportsNoCacheVolumesForBase() {
+    let check = Spawn.Doctor.cacheVolumeCheck(toolchain: .base, volumes: [])
+
+    #expect(check.status == .ok)
+    #expect(check.detail == "base: none needed")
+}
+
 @Test func renderJSONIncludesStructuredWorkspaceRuntime() throws {
     let report = Spawn.Doctor.Report(
         checks: [

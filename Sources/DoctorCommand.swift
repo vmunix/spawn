@@ -453,6 +453,28 @@ extension Spawn {
             )
         }
 
+        /// Reports the named `container` volumes that hold a toolchain's build caches.
+        ///
+        /// The caches deliberately live outside both the image and `/home/coder`, so
+        /// nothing in a workspace or a home reveals them. Naming them here is what
+        /// makes them inspectable (`container volume ls`) and removable
+        /// (`container volume delete <name>`).
+        static func cacheVolumeCheck(toolchain: Toolchain, volumes: [CacheVolume]) -> Check {
+            guard !volumes.isEmpty else {
+                return Check(
+                    status: .ok,
+                    title: "Cache volumes",
+                    detail: "\(toolchain.rawValue): none needed"
+                )
+            }
+
+            return Check(
+                status: .ok,
+                title: "Cache volumes",
+                detail: "\(toolchain.rawValue): \(volumes.map(\.name).joined(separator: ", "))"
+            )
+        }
+
         private static func containerSystemReport() -> ContainerSystemReport {
             do {
                 let (status, output) = try ContainerRunner.runCapture(args: ["system", "status"])
@@ -686,6 +708,12 @@ extension Spawn {
             checks.append(Self.imageCheck())
             checks.append(Self.envCheck())
             checks.append(Self.workspaceCheck(at: workspace))
+            let cacheToolchain = inspection.toolchain ?? .base
+            checks.append(
+                Self.cacheVolumeCheck(
+                    toolchain: cacheToolchain,
+                    volumes: CacheVolumes.forToolchain(cacheToolchain)
+                ))
             checks.append(contentsOf: Self.stateChecks())
 
             let workspaceReport = Self.workspaceReport(

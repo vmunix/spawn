@@ -49,6 +49,57 @@ Note: `Makefile` alone does not trigger the C++ toolchain -- it is too common ac
 
 All toolchain images extend `spawn-base:latest`, so they include everything in the base image plus language-specific tools.
 
+## Where toolchains live
+
+Language toolchains are installed under `/opt`, never in the container's home:
+
+| Toolchain | Location | Environment |
+|-----------|----------|-------------|
+| `rust` | `/opt/rust` | `RUSTUP_HOME=/opt/rust/rustup`, `CARGO_HOME=/opt/rust/cargo` |
+| `go` | `/opt/go`, `/usr/local/go` | `GOPATH=/opt/go` |
+| `js` | `/opt/js` | `BUN_INSTALL=/opt/js/bun`, `DENO_INSTALL=/opt/js/deno`, `DENO_DIR=/opt/js/deno-cache` |
+| `cpp` | system paths (apt) | -- |
+
+`/home/coder` therefore holds user state only: a toolchain image adds nothing to it, and its contents stay identical to `spawn-base:latest`. `make smoke` enforces that -- it counts the files under `/home/coder` in each image and fails if a toolchain image differs from base.
+
+All of these are already on `PATH` inside the container, so no setup is needed. If you hardcoded the old locations (`/home/coder/.cargo`, `/home/coder/.rustup`, `/home/coder/go`, `/home/coder/.bun`, `/home/coder/.deno`) in a script or in `.spawn.toml`, point them at the `/opt` paths above.
+
+## Build caches
+
+Build caches persist automatically between runs in named `container` volumes, mounted at run time. They are deliberately not baked into the image and not part of its home: they should survive between runs, but they are not user state. (`npm` is the exception to the path rule -- its cache keeps npm's default `$HOME/.npm` location, but it is still a mounted volume, not image content.)
+
+| Toolchain | Volume | Mounted at |
+|-----------|--------|------------|
+| `rust` | `spawn-cache-cargo-registry` | `/opt/rust/cargo/registry` |
+| `rust` | `spawn-cache-cargo-git` | `/opt/rust/cargo/git` |
+| `go` | `spawn-cache-go-mod` | `/opt/go/pkg/mod` |
+| `js` | `spawn-cache-deno` | `/opt/js/deno-cache` |
+| `js` | `spawn-cache-npm` | `/home/coder/.npm` |
+| `base`, `cpp` | *(none)* | |
+
+spawn creates a missing volume on demand and hands it to the `coder` user before the first run uses it. `spawn doctor` lists the volumes for the detected toolchain, and `spawn doctor --json` includes the same line as a `checks[]` entry titled `Cache volumes`.
+
+### Clearing a cache
+
+There is no `spawn cache` command. Use the `container` CLI directly -- spawn recreates the volume, empty, on the next run:
+
+```bash
+container volume ls                                  # inspect
+container volume delete spawn-cache-cargo-registry   # clear one
+```
+
+### Upgrading existing images
+
+The `go` image layout changed: it now pre-creates a coder-owned `/opt/go/pkg/mod` so the module-cache volume does not leave `/opt/go/pkg` root-owned, which would stop `go` from writing its sibling `sumdb` directory.
+
+spawn cannot detect an image built before that change. **If you already have a `spawn-go:latest`, rebuild it once:**
+
+```bash
+spawn build go
+```
+
+Without the rebuild, Go commands fail with permission errors when writing the module cache.
+
 ## Overriding detection
 
 ### CLI flag
