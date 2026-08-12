@@ -155,20 +155,33 @@ section "Toolchain images keep /home/coder identical to base"
 # The invariant this slice exists to establish: a toolchain image must not add
 # anything to /home/coder. If this fails, a toolchain is leaking into the home,
 # which mixes build state with user state and makes the home expensive to copy.
-home_file_count() {
-  "${CONTAINER_BIN}" run --rm "$1" /bin/sh -c 'find /home/coder -type f | wc -l' | tr -d '[:space:]'
+#
+# Compare the sorted path listings, not file counts: the base home is built
+# largely from symlinks (.claude.json, .gitconfig) and directories
+# (.claude-state, .gitconfig-dir, .local/bin), so counting only `-type f`
+# would wave through a compatibility symlink such as
+# `ln -s /opt/rust/cargo /home/coder/.cargo`, a directory-only leak, or a
+# one-added-one-removed swap.
+home_listing() {
+  "${CONTAINER_BIN}" run --rm "$1" /bin/sh -c 'find /home/coder -mindepth 1 | LC_ALL=C sort'
 }
 
-base_home_count="$(home_file_count spawn-base:latest)"
-[[ "${base_home_count}" =~ ^[1-9][0-9]*$ ]] \
-  || fail "could not count files under /home/coder in spawn-base:latest (got '${base_home_count}')"
+base_home_listing="$(home_listing spawn-base:latest)"
+[[ -n "${base_home_listing}" ]] \
+  || fail "could not list /home/coder in spawn-base:latest (empty listing)"
 
 for toolchain in cpp rust go js; do
-  toolchain_home_count="$(home_file_count "spawn-${toolchain}:latest")"
-  if [[ "${toolchain_home_count}" != "${base_home_count}" ]]; then
-    fail "spawn-${toolchain} has ${toolchain_home_count} files under /home/coder, spawn-base has ${base_home_count}: toolchains must live under /opt, not in the home"
+  toolchain_home_listing="$(home_listing "spawn-${toolchain}:latest")"
+  [[ -n "${toolchain_home_listing}" ]] \
+    || fail "could not list /home/coder in spawn-${toolchain}:latest (empty listing)"
+
+  if [[ "${toolchain_home_listing}" != "${base_home_listing}" ]]; then
+    printf 'differences under /home/coder ("<" only in spawn-%s, ">" only in spawn-base):\n' "${toolchain}" >&2
+    diff <(printf '%s\n' "${toolchain_home_listing}") <(printf '%s\n' "${base_home_listing}") >&2 || true
+    fail "spawn-${toolchain} does not keep /home/coder identical to spawn-base: toolchains must live under /opt, not in the home"
   fi
 done
-printf 'PASS: all toolchain images keep /home/coder identical to base (%s files)\n\n' "${base_home_count}"
+printf 'PASS: all toolchain images keep /home/coder identical to base (%s entries)\n\n' \
+  "$(printf '%s\n' "${base_home_listing}" | wc -l | tr -d '[:space:]')"
 
 printf '=== All smoke tests passed ===\n'

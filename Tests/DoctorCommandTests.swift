@@ -279,7 +279,8 @@ import Testing
 @Test func doctorReportsCacheVolumes() {
     let check = Spawn.Doctor.cacheVolumeCheck(
         toolchain: .rust,
-        volumes: CacheVolumes.forToolchain(.rust)
+        volumes: CacheVolumes.forToolchain(.rust),
+        exists: { _ in true }
     )
 
     #expect(check.status == .ok)
@@ -287,10 +288,38 @@ import Testing
     #expect(check.detail == "rust: spawn-cache-cargo-registry, spawn-cache-cargo-git")
 }
 
+@Test func doctorMarksCacheVolumesThatDoNotExistYet() {
+    let check = Spawn.Doctor.cacheVolumeCheck(
+        toolchain: .rust,
+        volumes: CacheVolumes.forToolchain(.rust),
+        exists: { _ in false }
+    )
+
+    #expect(check.status == .ok)
+    #expect(
+        check.detail
+            == "rust: spawn-cache-cargo-registry (not created yet), spawn-cache-cargo-git (not created yet)"
+    )
+}
+
+@Test func doctorMarksOnlyTheMissingCacheVolume() {
+    let check = Spawn.Doctor.cacheVolumeCheck(
+        toolchain: .rust,
+        volumes: CacheVolumes.forToolchain(.rust),
+        exists: { $0 == "spawn-cache-cargo-registry" }
+    )
+
+    #expect(check.detail == "rust: spawn-cache-cargo-registry, spawn-cache-cargo-git (not created yet)")
+}
+
 @Test func doctorNamesEveryCacheVolumeOfAToolchain() {
     for toolchain in Toolchain.allCases {
         let volumes = CacheVolumes.forToolchain(toolchain)
-        let check = Spawn.Doctor.cacheVolumeCheck(toolchain: toolchain, volumes: volumes)
+        let check = Spawn.Doctor.cacheVolumeCheck(
+            toolchain: toolchain,
+            volumes: volumes,
+            exists: { _ in true }
+        )
         for volume in volumes {
             #expect(check.detail.contains(volume.name))
         }
@@ -298,7 +327,11 @@ import Testing
 }
 
 @Test func doctorReportsNoCacheVolumesForBase() {
-    let check = Spawn.Doctor.cacheVolumeCheck(toolchain: .base, volumes: [])
+    let check = Spawn.Doctor.cacheVolumeCheck(
+        toolchain: .base,
+        volumes: [],
+        exists: { _ in false }
+    )
 
     #expect(check.status == .ok)
     #expect(check.detail == "base: none needed")

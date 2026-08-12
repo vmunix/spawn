@@ -459,7 +459,16 @@ extension Spawn {
         /// nothing in a workspace or a home reveals them. Naming them here is what
         /// makes them inspectable (`container volume ls`) and removable
         /// (`container volume delete <name>`).
-        static func cacheVolumeCheck(toolchain: Toolchain, volumes: [CacheVolume]) -> Check {
+        ///
+        /// `exists` is the `CacheVolumeOperations` seam, injected so the check stays
+        /// pure and unit-testable. A volume that has not been created yet is normal
+        /// before a toolchain's first run — spawn creates it on demand — so it is
+        /// annotated rather than reported as a fault.
+        static func cacheVolumeCheck(
+            toolchain: Toolchain,
+            volumes: [CacheVolume],
+            exists: @Sendable (String) -> Bool = CacheVolumeOperations.containerCLI.exists
+        ) -> Check {
             guard !volumes.isEmpty else {
                 return Check(
                     status: .ok,
@@ -468,10 +477,14 @@ extension Spawn {
                 )
             }
 
+            let described = volumes.map { volume in
+                exists(volume.name) ? volume.name : "\(volume.name) (not created yet)"
+            }
+
             return Check(
                 status: .ok,
                 title: "Cache volumes",
-                detail: "\(toolchain.rawValue): \(volumes.map(\.name).joined(separator: ", "))"
+                detail: "\(toolchain.rawValue): \(described.joined(separator: ", "))"
             )
         }
 
