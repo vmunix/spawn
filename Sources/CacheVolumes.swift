@@ -46,8 +46,10 @@ enum CacheVolumes: Sendable {
 /// fails with "Permission denied" instead of populating the cache. Each volume
 /// is therefore chowned once, at creation, from a throwaway root container.
 enum CacheVolumePreparation: Sendable {
-    static let guestUID = 1001
-    static let guestGID = 1001
+    /// The guest user, by name. Deliberately not the numeric uid: `useradd` in
+    /// the base image assigns it implicitly, and `chown` to a numeric id that no
+    /// longer maps to a user still exits 0, so drift would go unnoticed.
+    static let guestUser = "coder"
 
     /// `container run` arguments for a throwaway root container that chowns
     /// every given volume to the guest user.
@@ -57,7 +59,24 @@ enum CacheVolumePreparation: Sendable {
             args += ["--volume", "\(volume.name):\(volume.guestPath)"]
         }
         let paths = volumes.map(\.guestPath).joined(separator: " ")
-        args += [image, "sh", "-c", "chown \(guestUID):\(guestGID) \(paths)"]
+        args += [image, "sh", "-c", "chown \(guestUser):\(guestUser) \(paths)"]
         return args
     }
+}
+
+/// The `container volume` operations that preparation needs.
+///
+/// Injectable so the failure paths — which must leave no half-prepared volume
+/// behind — can be exercised without a container runtime, mirroring the
+/// `containerPath:` override on `ContainerRunner.preflight`.
+struct CacheVolumeOperations: Sendable {
+    /// Whether a named volume already exists.
+    var exists: @Sendable (String) -> Bool
+    /// Create a named volume. Returns whether it succeeded.
+    var create: @Sendable (String) -> Bool
+    /// Delete a named volume. Returns whether it succeeded.
+    var delete: @Sendable (String) -> Bool
+    /// Chown the given volumes to the guest user, from a throwaway root
+    /// container built on `image`. Returns whether it succeeded.
+    var chown: @Sendable (_ volumes: [CacheVolume], _ image: String) -> Bool
 }

@@ -144,41 +144,59 @@ enum ContainerRunner: Sendable {
     ///
     /// A newly created named volume is root-owned, so the guest user cannot write
     /// into it. Volumes are chowned once, at creation, from a throwaway root
-    /// container; an already-existing volume was prepared by an earlier run.
+    /// container.
+    ///
+    /// The invariant this upholds is **a `spawn-cache-*` volume that exists on
+    /// disk has been chowned**, which is what makes the cheap existence check a
+    /// valid test for "already prepared". Any failure part-way through therefore
+    /// deletes the volumes this call created: a created-but-unchowned volume
+    /// would be indistinguishable from a prepared one on the next run, and would
+    /// then be mounted root-owned on every subsequent run, failing every build
+    /// with EACCES and never self-healing.
     ///
     /// - Returns: the volumes safe to mount. A volume that could not be prepared
     ///   is dropped rather than mounted, so a run degrades to "no cache" instead
     ///   of failing every build with permission errors.
-    static func prepareCacheVolumes(_ volumes: [CacheVolume], image: String) -> [CacheVolume] {
+    static func prepareCacheVolumes(
+        _ volumes: [CacheVolume],
+        image: String,
+        operations: CacheVolumeOperations = .containerCLI
+    ) -> [CacheVolume] {
         guard !volumes.isEmpty else { return [] }
 
-        let missing = volumes.filter { !volumeExists($0.name) }
+        let missing = volumes.filter { !operations.exists($0.name) }
         guard !missing.isEmpty else { return volumes }
 
+        // Volumes that predate this call are prepared, by the invariant above,
+        // so they stay usable even if preparing the new ones fails.
+        let preexisting = volumes.filter { !missing.contains($0) }
+
         var created: [CacheVolume] = []
+        func rollBack() -> [CacheVolume] {
+            for volume in created where !operations.delete(volume.name) {
+                logger.warning(
+                    "Could not remove the unprepared cache volume \(volume.name). Delete it with 'container volume delete \(volume.name)', or builds using it will fail with permission errors."
+                )
+            }
+            return preexisting
+        }
+
         for volume in missing {
-            guard let status = try? runQuiet(args: ["volume", "create", volume.name]), status == 0 else {
+            guard operations.create(volume.name) else {
                 logger.warning("Could not create cache volume \(volume.name); continuing without it")
-                return volumes.filter { !missing.contains($0) }
+                return rollBack()
             }
             created.append(volume)
         }
 
-        let chownArgs = CacheVolumePreparation.chownArgs(image: image, volumes: created)
-        guard let status = try? runQuiet(args: chownArgs), status == 0 else {
-            logger.warning(
-                "Could not hand cache volumes to the guest user; continuing without them"
-            )
-            return volumes.filter { !missing.contains($0) }
+        // Chown the whole set, not just the new volumes: it costs nothing extra
+        // in the same container and repairs any volume whose ownership drifted.
+        guard operations.chown(volumes, image) else {
+            logger.warning("Could not hand cache volumes to the guest user; continuing without them")
+            return rollBack()
         }
 
         return volumes
-    }
-
-    /// Whether a named volume already exists.
-    private static func volumeExists(_ name: String) -> Bool {
-        guard let status = try? runQuiet(args: ["volume", "inspect", name]) else { return false }
-        return status == 0
     }
 
     /// Run the container CLI with output discarded, returning the exit status.
@@ -333,4 +351,25 @@ enum ContainerRunner: Sendable {
         }
         return binary
     }
+
+    /// Run the container CLI with output discarded, reporting success only on a
+    /// zero exit status. A launch failure counts as failure, never as success.
+    fileprivate static func succeededQuietly(_ args: [String]) -> Bool {
+        guard let status = try? runQuiet(args: args) else { return false }
+        return status == 0
+    }
+}
+
+extension CacheVolumeOperations {
+    /// The real operations, backed by the `container volume` subcommands.
+    static let containerCLI = CacheVolumeOperations(
+        exists: { ContainerRunner.succeededQuietly(["volume", "inspect", $0]) },
+        create: { ContainerRunner.succeededQuietly(["volume", "create", $0]) },
+        delete: { ContainerRunner.succeededQuietly(["volume", "delete", $0]) },
+        chown: { volumes, image in
+            ContainerRunner.succeededQuietly(
+                CacheVolumePreparation.chownArgs(image: image, volumes: volumes)
+            )
+        }
+    )
 }
