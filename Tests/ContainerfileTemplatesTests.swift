@@ -34,7 +34,10 @@ import Testing
 @Test func rustInstallerDoesNotEditShellRcFiles() {
     // rustup appends to ~/.bashrc and ~/.profile unless told not to; those edits are
     // toolchain state in a file the home will own and share across toolchains.
-    #expect(ContainerfileTemplates.content(for: .rust).contains("--no-modify-path"))
+    // Assert the actual installer invocation carries the flag, not just that the
+    // literal substring appears somewhere in the template (an explanatory comment
+    // could contain it too, and would let a stripped flag pass silently).
+    #expect(ContainerfileTemplates.content(for: .rust).contains("sh -s -- -y --no-modify-path"))
 }
 
 @Test func goContainerfileExtendsBase() {
