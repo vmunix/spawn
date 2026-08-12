@@ -122,7 +122,7 @@ Expected: PASS.
 - [ ] **Step 5: Rebuild and verify empirically**
 
 ```bash
-swift run spawn build --toolchain rust
+swift run spawn build rust
 container run --rm spawn-rust:latest /bin/sh -c \
   'rustc --version && cargo --version && du -sh /opt/rust && find /home/coder -type f | wc -l'
 ```
@@ -245,7 +245,7 @@ Expected: PASS.
 - [ ] **Step 5: Rebuild and verify empirically**
 
 ```bash
-swift run spawn build --toolchain js
+swift run spawn build js
 container run --rm spawn-js:latest /bin/sh -c \
   'bun --version && deno --version | head -1 && find /home/coder -type f | wc -l && grep -cE "bun|deno" /home/coder/.bashrc'
 ```
@@ -319,7 +319,7 @@ Expected: PASS.
 - [ ] **Step 5: Rebuild and verify empirically**
 
 ```bash
-swift run spawn build --toolchain go
+swift run spawn build go
 container run --rm spawn-go:latest /bin/sh -c \
   'go version && go env GOPATH GOMODCACHE && find /home/coder -type f | wc -l'
 ```
@@ -489,7 +489,7 @@ Expected: PASS, whole suite. The default `= []` keeps every existing `buildArgs`
 - [ ] **Step 5: Verify the cache actually persists**
 
 ```bash
-swift run spawn build --toolchain rust
+swift run spawn build rust
 cd fixtures/rust-sample
 swift run spawn -- cargo fetch          # populates the volume
 container volume list | grep spawn-cache
@@ -544,7 +544,7 @@ echo "PASS: all toolchain images keep /home/coder identical to base (${base_home
 - [ ] **Step 2: Run it to verify it fails on unrebuilt images**
 
 Run: `make smoke`
-Expected: FAIL for `rust` (49,650 vs 7) if images predate Tasks 1-3 — which is the point. Rebuild with `swift run spawn build --all`, then it passes.
+Expected: FAIL for `rust` (49,650 vs 7) if images predate Tasks 1-3 — which is the point. Rebuild with `swift run spawn build`, then it passes.
 
 - [ ] **Step 3: Add the doctor check**
 
@@ -607,7 +607,7 @@ Then remove the `images` target from the `Makefile`. If you would rather keep th
 ```bash
 make test
 make smoke
-swift run spawn build --all
+swift run spawn build
 container run --rm spawn-rust:latest /bin/sh -c 'find /home/coder -type f | wc -l'   # expect 7
 git add -A
 git commit -m "test: enforce toolchain-free home, report cache volumes, drop stale Images/"
