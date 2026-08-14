@@ -44,7 +44,11 @@ expect_regex() {
   local pattern="$2"
   local label="$3"
 
-  if ! printf '%s\n' "${haystack}" | grep -Eq "${pattern}"; then
+  # The `--` is load-bearing: without it grep reads a pattern starting with `-`
+  # (every --volume assertion below) as an unknown option and exits 2 before
+  # reading stdin. That reads as "no match" here, so a correct run hard-fails,
+  # and as "matched" in expect_not_regex, so a regression passes silently.
+  if ! printf '%s\n' "${haystack}" | grep -Eq -- "${pattern}"; then
     printf '%s\n' "${haystack}" >&2
     fail "${label} did not match ${pattern}"
   fi
@@ -55,7 +59,7 @@ expect_not_regex() {
   local pattern="$2"
   local label="$3"
 
-  if printf '%s\n' "${haystack}" | grep -Eq "${pattern}"; then
+  if printf '%s\n' "${haystack}" | grep -Eq -- "${pattern}"; then
     printf '%s\n' "${haystack}" >&2
     fail "${label} unexpectedly matched ${pattern}"
   fi
@@ -108,7 +112,19 @@ RUST_FIXTURE_CACHE="$(cargo_registry_volume "${REPLY}")"
 # Same project contents at another path: the caches must not be the same volumes,
 # or one workspace could read and rewrite another's dependency sources.
 CACHE_PROBE_DIR="$(mktemp -d)"
-trap 'rm -rf "${CACHE_PROBE_DIR}"' EXIT
+# Global cache volumes this run creates, deleted on the way out. Only ones this
+# run created: a user upgrading from the pre-scoping build has real content in
+# exactly those names, and smoke must not wipe it. In the trap, so a failing
+# assertion between here and the end does not leak them either.
+SMOKE_CREATED_VOLUMES=()
+cleanup_cache_probe() {
+  rm -rf "${CACHE_PROBE_DIR}"
+  local volume
+  for volume in ${SMOKE_CREATED_VOLUMES+"${SMOKE_CREATED_VOLUMES[@]}"}; do
+    "${CONTAINER_BIN}" volume delete "${volume}" >/dev/null 2>&1 || true
+  done
+}
+trap cleanup_cache_probe EXIT
 cp -R "${ROOT}/fixtures/rust-sample" "${CACHE_PROBE_DIR}/rust-sample"
 
 run_and_capture "Doctor JSON scopes caches to the workspace path" \
@@ -143,6 +159,14 @@ expect_not_regex "${REPLY}" \
   "--volume ${PROBE_CACHE}:" "a run must not mount another workspace's cache volume"
 
 # The flag is the only way to reach the global volumes, and it must still work.
+# Record which globals are absent first: those are the ones this run creates and
+# is therefore allowed to delete afterwards.
+for volume in spawn-cache-cargo-registry spawn-cache-cargo-git; do
+  if ! "${CONTAINER_BIN}" volume inspect "${volume}" >/dev/null 2>&1; then
+    SMOKE_CREATED_VOLUMES+=("${volume}")
+  fi
+done
+
 run_and_capture "Rust fixture: --cache shared mounts the global caches" \
   /bin/bash -lc "cd \"${ROOT}/fixtures/rust-sample\" && \"${SPAWN_BIN}\" --verbose --cache shared -- true"
 expect_regex "${REPLY}" \
@@ -150,10 +174,6 @@ expect_regex "${REPLY}" \
 expect_contains "${REPLY}" "readable and writable" "--cache shared must warn about the sharing"
 expect_not_regex "${REPLY}" \
   "--volume ${RUST_FIXTURE_CACHE}:" "--cache shared must not also mount the private cache"
-
-# Created by the probe above; the docs tell users to delete these, so smoke does too.
-"${CONTAINER_BIN}" volume delete spawn-cache-cargo-registry >/dev/null 2>&1 || true
-"${CONTAINER_BIN}" volume delete spawn-cache-cargo-git >/dev/null 2>&1 || true
 
 run_and_capture "Go fixture: explicit workspace + access profile" \
   "${SPAWN_BIN}" -C "${ROOT}/fixtures/go-sample" --access minimal -- /bin/bash -lc \
