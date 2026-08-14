@@ -154,16 +154,48 @@ enum ContainerRunner: Sendable {
     /// then be mounted root-owned on every subsequent run, failing every build
     /// with EACCES and never self-healing.
     ///
+    /// That invariant only holds against *this* process, though: a second spawn
+    /// preparing the same volumes can be observed mid-preparation, when its
+    /// volumes exist and are not yet chowned. Preparation therefore runs under a
+    /// host lock keyed on the volume set — see `CacheVolumeLock` for the two
+    /// interleavings that produces and why the lock is host-side.
+    ///
     /// - Returns: the volumes safe to mount. A volume that could not be prepared
     ///   is dropped rather than mounted, so a run degrades to "no cache" instead
     ///   of failing every build with permission errors.
     static func prepareCacheVolumes(
         _ volumes: [CacheVolume],
         image: String,
-        operations: CacheVolumeOperations = .containerCLI
+        operations: CacheVolumeOperations = .containerCLI,
+        lock: CacheVolumeLock = .hostFile()
     ) -> [CacheVolume] {
         guard !volumes.isEmpty else { return [] }
 
+        // The lock is taken before anything looks at a volume, and the check
+        // that decides is the one made under it. A lock-free "nothing is
+        // missing, we are done" fast path would reinstate the exact race this
+        // closes: existence proves preparation only while no peer is
+        // mid-preparation, and holding the lock is what establishes that. The
+        // lock costs an `open` and a syscall, so there is nothing to win by
+        // guessing first.
+        let release = lock.acquire(CacheVolumeLock.key(for: volumes))
+        if release == nil {
+            logger.warning(
+                "Could not serialize cache volume preparation; continuing without it. A spawn running concurrently on this workspace may leave a cache volume unwritable."
+            )
+        }
+        defer { release?() }
+
+        return prepareCacheVolumesLocked(volumes, image: image, operations: operations)
+    }
+
+    /// The body of `prepareCacheVolumes`, run under its lock. Split out so the
+    /// existence check cannot accidentally be hoisted above the acquisition.
+    private static func prepareCacheVolumesLocked(
+        _ volumes: [CacheVolume],
+        image: String,
+        operations: CacheVolumeOperations
+    ) -> [CacheVolume] {
         let missing = volumes.filter { !operations.exists($0.name) }
         guard !missing.isEmpty else { return volumes }
 

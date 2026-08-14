@@ -86,7 +86,9 @@ RunCommand.run()
   → ContainerRunner.prepareCacheVolumes()
                                   # Create and chown missing build-cache volumes
                                   # (skipped for --image; the only step that boots
-                                  # a container as root)
+                                  # a container as root). Serialized against a
+                                  # concurrent spawn by a host flock on the volume
+                                  # set, released before the run starts.
   → ContainerRunner.run()         # Launch container
 ```
 
