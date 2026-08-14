@@ -26,8 +26,12 @@ extension Spawn {
                   --runtime workspace-image      Build or reuse a workspace runtime
                   --rebuild-workspace-image      Ignore cache for workspace-image runs
 
+                Build caches:
+                  --cache workspace              Default; caches private to this workspace
+                  --cache shared                 Reuse one cache across every opted-in workspace
+
                 Workspace defaults:
-                  .spawn.toml [workspace]        Default agent; access still requires --access
+                  .spawn.toml [workspace]        Default agent and cache scope; access still requires --access
                   .spawn.toml [toolchain]        Default spawn-managed toolchain base
 
                 Other useful forms:
@@ -77,6 +81,9 @@ extension Spawn {
 
         @Option(name: .long, help: "Host access profile: minimal, git, trusted.")
         var access: String?
+
+        @Option(name: .long, help: "Build cache scope: workspace (default, private), shared.")
+        var cache: String?
 
         @Option(name: .long, help: "Runtime mode: auto, spawn, workspace-image.")
         var runtime: String = RuntimeMode.auto.rawValue
@@ -160,6 +167,15 @@ extension Spawn {
             let accessProfile = try AccessProfile.parse(resolvedAccess)
             if access == nil, let configuredAccess = workspaceConfig?.accessProfile, configuredAccess != .minimal {
                 print("Warning: ignoring .spawn.toml access=\(configuredAccess.rawValue). Pass '--access \(configuredAccess.rawValue)' explicitly to opt into host auth exposure.")
+            }
+            let cacheScope = try CacheScope.parse(
+                RunRuntimePolicy.effectiveCacheScopeName(
+                    cacheOverride: cache,
+                    workspaceConfig: workspaceConfig
+                )
+            )
+            if cacheScope == .shared {
+                print("Note: build caches are shared with every workspace using '--cache shared'; they are readable and writable by all of them.")
             }
             let runtimeMode = try RuntimeMode.parse(runtime)
             try RunRuntimePolicy.validateOptions(
@@ -294,7 +310,12 @@ extension Spawn {
                 cpus: cpus,
                 memory: memory,
                 cacheVolumes: ContainerRunner.prepareCacheVolumes(
-                    CacheVolumes.forRun(toolchain: resolvedToolchain, imageOverride: image),
+                    CacheVolumes.forRun(
+                        toolchain: resolvedToolchain,
+                        imageOverride: image,
+                        scope: cacheScope,
+                        workspace: path
+                    ),
                     // The spawn-managed image for the toolchain, never
                     // `resolvedImage`: preparation is the one place spawn runs a
                     // container as root, so it must not run a `--image` override.

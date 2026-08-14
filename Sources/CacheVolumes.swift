@@ -26,25 +26,49 @@ enum CacheVolumes: Sendable {
     /// chowned; go needed an explicit `mkdir -p /opt/go/pkg/mod`, without which
     /// a root-owned `/opt/go/pkg` blocked `go` from writing `sumdb`. A new
     /// toolchain's template must satisfy this before its cache is added here.
-    static func forToolchain(_ toolchain: Toolchain) -> [CacheVolume] {
+    ///
+    /// Names are scoped: under `.workspace` (the default everywhere a user has
+    /// not asked otherwise) the workspace identity is appended, so an unrelated
+    /// workspace — including one running under `--access minimal` — cannot read
+    /// the dependency sources this one cached or write the cache it will read
+    /// next. Under `.shared` the historical global names are used verbatim, so
+    /// opting in reuses volumes that already exist on disk.
+    static func forToolchain(_ toolchain: Toolchain, scope: CacheScope, workspace: URL) -> [CacheVolume] {
+        let suffix = nameSuffix(scope: scope, workspace: workspace)
         switch toolchain {
         case .base, .cpp:
             return []
         case .rust:
             // CARGO_HOME=/opt/rust/cargo
             return [
-                CacheVolume(name: prefix + "cargo-registry", guestPath: "/opt/rust/cargo/registry"),
-                CacheVolume(name: prefix + "cargo-git", guestPath: "/opt/rust/cargo/git"),
+                CacheVolume(name: prefix + "cargo-registry" + suffix, guestPath: "/opt/rust/cargo/registry"),
+                CacheVolume(name: prefix + "cargo-git" + suffix, guestPath: "/opt/rust/cargo/git"),
             ]
         case .go:
             // GOPATH=/opt/go
-            return [CacheVolume(name: prefix + "go-mod", guestPath: "/opt/go/pkg/mod")]
+            return [CacheVolume(name: prefix + "go-mod" + suffix, guestPath: "/opt/go/pkg/mod")]
         case .js:
             // DENO_DIR=/opt/js/deno-cache; npm keeps its default $HOME/.npm cache.
             return [
-                CacheVolume(name: prefix + "deno", guestPath: "/opt/js/deno-cache"),
-                CacheVolume(name: prefix + "npm", guestPath: "/home/coder/.npm"),
+                CacheVolume(name: prefix + "deno" + suffix, guestPath: "/opt/js/deno-cache"),
+                CacheVolume(name: prefix + "npm" + suffix, guestPath: "/home/coder/.npm"),
             ]
+        }
+    }
+
+    /// The scope-dependent tail of every cache volume name.
+    ///
+    /// The workspace identity comes from `WorkspaceIdentity`, the same
+    /// derivation that names workspace runtime images, so a workspace's image
+    /// and its caches agree on what "this workspace" is — and a path is
+    /// standardized first, so `~/code/app` and `~/code/app/` share one cache
+    /// rather than silently starting a second.
+    private static func nameSuffix(scope: CacheScope, workspace: URL) -> String {
+        switch scope {
+        case .shared:
+            return ""
+        case .workspace:
+            return "-" + WorkspaceIdentity.key(for: workspace.standardizedFileURL)
         }
     }
 
@@ -56,9 +80,14 @@ enum CacheVolumes: Sendable {
     /// reports a toolchain for such a run, so the override — not the detected
     /// toolchain — decides. No volume is created either, which keeps a run that
     /// never populates a cache from paying create-and-roll-back every time.
-    static func forRun(toolchain: Toolchain, imageOverride: String?) -> [CacheVolume] {
+    static func forRun(
+        toolchain: Toolchain,
+        imageOverride: String?,
+        scope: CacheScope,
+        workspace: URL
+    ) -> [CacheVolume] {
         guard imageOverride == nil else { return [] }
-        return forToolchain(toolchain)
+        return forToolchain(toolchain, scope: scope, workspace: workspace)
     }
 }
 

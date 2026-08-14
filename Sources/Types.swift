@@ -65,11 +65,36 @@ enum AccessProfile: String, CaseIterable, Sendable {
     }
 }
 
+/// Controls whether build caches are private to one workspace or shared across
+/// every workspace that opts in.
+///
+/// The default is `workspace`: a cache volume holds dependency sources fetched
+/// with the workspace's own credentials — `cargo`'s git cache can hold private
+/// repositories — and it is mounted read-write, so a shared cache is both a
+/// confidentiality and an integrity channel between unrelated workspaces.
+/// Sharing is therefore something a user asks for, not something they get.
+enum CacheScope: String, CaseIterable, Sendable {
+    /// Volume names carry the workspace identity, so no two workspaces meet.
+    case workspace
+    /// The unscoped, global volume names, shared by every opted-in workspace.
+    case shared
+
+    /// Parse a cache scope name, throwing a clear error if invalid.
+    static func parse(_ name: String) throws -> CacheScope {
+        guard let scope = CacheScope(rawValue: name) else {
+            let valid = CacheScope.allCases.map(\.rawValue).joined(separator: ", ")
+            throw ValidationError("Unknown cache scope: \(name). Use: \(valid).")
+        }
+        return scope
+    }
+}
+
 /// Parsed workspace defaults from `.spawn.toml`.
 struct WorkspaceConfig: Sendable, Equatable {
     let toolchainName: String?
     let agentName: String?
     let accessName: String?
+    let cacheName: String?
 
     var toolchain: Toolchain? {
         guard let toolchainName else { return nil }
@@ -79,6 +104,11 @@ struct WorkspaceConfig: Sendable, Equatable {
     var accessProfile: AccessProfile? {
         guard let accessName else { return nil }
         return AccessProfile(rawValue: accessName)
+    }
+
+    var cacheScope: CacheScope? {
+        guard let cacheName else { return nil }
+        return CacheScope(rawValue: cacheName)
     }
 }
 

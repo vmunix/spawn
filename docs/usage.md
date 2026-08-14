@@ -30,7 +30,7 @@ USAGE: spawn run [options] [-- <command...>]
 Use `spawn codex` at the root to switch agents quickly, or `spawn run --agent codex` if you want the explicit subcommand form.
 Use `spawn -- <command...>` for passthrough commands. `spawn cargo test` is rejected on purpose so the root CLI stays unambiguous.
 
-`.spawn.toml` may set the default agent for a workspace. Host access still requires an explicit `--access ...` at launch time.
+`.spawn.toml` may set the default agent and build-cache scope for a workspace. Host access still requires an explicit `--access ...` at launch time.
 
 ### Options
 
@@ -42,6 +42,7 @@ Use `spawn -- <command...>` for passthrough commands. `spawn cargo test` is reje
 | `--runtime <name>` | Runtime mode: `auto`, `spawn`, `workspace-image` |
 | `--rebuild-workspace-image` | Force a rebuild when using `--runtime workspace-image` |
 | `--access <name>` | Host access profile: `minimal`, `git`, `trusted` |
+| `--cache <scope>` | Build cache scope: `workspace` (default, private to this workspace), `shared` |
 | `--toolchain <name>` | Override auto-detected toolchain: `base`, `cpp`, `rust`, `go`, `js` |
 | `--image <name>` | Override auto-selected container image |
 | `--mount <dir>` | Additional directory to mount (repeatable) |
@@ -193,6 +194,7 @@ spawn doctor --json     # Same report in machine-readable form
 ```
 
 `spawn doctor` reports local runtime readiness, the workspace image resolution, and, when `.spawn.toml` is present, the configured workspace values such as `agent` and `access`.
+It also names the build-cache volumes that this workspace would mount, and the scope they use — workspace-scoped by default, or shared if the workspace opted in. See [Toolchains: cache scope](toolchains.md#cache-scope).
 Use `-C/--cwd` to inspect another workspace without changing directories; a positional path still works for compatibility.
 For workspace-image runtimes it also shows cache state plus the tracked Dockerfile, optional `.dockerignore`, context, config, and cache-record paths.
 It also reports whether the local `container` services are running, whether a default kernel is installed, and whether Rosetta is available on Apple Silicon hosts. When the host is not ready, it points you at the usual first-machine fixes such as `container system start --enable-kernel-install`, `container system kernel set --recommended`, and `softwareupdate --install-rosetta --agree-to-license`.

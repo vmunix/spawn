@@ -1,3 +1,4 @@
+import ArgumentParser
 import Testing
 
 @testable import spawn
@@ -65,4 +66,37 @@ import Testing
     #expect(codex.name == "codex")
     #expect(codex.safeEntrypoint == ["codex", "--full-auto"])
     #expect(codex.yoloEntrypoint == ["codex", "--full-auto"])
+}
+
+@Test func cacheScopeParsesBothScopes() throws {
+    #expect(try CacheScope.parse("workspace") == .workspace)
+    #expect(try CacheScope.parse("shared") == .shared)
+    #expect(CacheScope.allCases.count == 2)
+}
+
+@Test func cacheScopeRejectsAnUnknownScopeAndNamesTheValidOnes() {
+    #expect(throws: ValidationError.self) {
+        try CacheScope.parse("global")
+    }
+
+    do {
+        _ = try CacheScope.parse("global")
+        Issue.record("an unknown cache scope must not parse")
+    } catch {
+        let message = String(describing: error)
+        for scope in CacheScope.allCases {
+            #expect(message.contains(scope.rawValue))
+        }
+    }
+}
+
+@Test func workspaceConfigExposesTheConfiguredCacheScope() {
+    let shared = WorkspaceConfig(toolchainName: nil, agentName: nil, accessName: nil, cacheName: "shared")
+    #expect(shared.cacheScope == .shared)
+
+    let unset = WorkspaceConfig(toolchainName: nil, agentName: nil, accessName: nil, cacheName: nil)
+    #expect(unset.cacheScope == nil)
+
+    let bogus = WorkspaceConfig(toolchainName: nil, agentName: nil, accessName: nil, cacheName: "everyone")
+    #expect(bogus.cacheScope == nil)
 }

@@ -3,35 +3,166 @@ import Testing
 
 @testable import spawn
 
+/// Two unrelated workspaces, used throughout to prove that scoping actually
+/// separates them. They deliberately share a last path component, so a
+/// slug-only derivation would collide and be caught here.
+private let workspaceA = URL(fileURLWithPath: "/Users/me/code/project")
+private let workspaceB = URL(fileURLWithPath: "/Users/me/other/project")
+
+/// Cache volumes for a toolchain in the default (private) scope.
+private func privateCaches(_ toolchain: Toolchain, in workspace: URL = workspaceA) -> [CacheVolume] {
+    CacheVolumes.forToolchain(toolchain, scope: .workspace, workspace: workspace)
+}
+
+/// Cache volumes for a toolchain in the opt-in shared scope. The workspace is
+/// still passed — and must be ignored.
+private func sharedCaches(_ toolchain: Toolchain, in workspace: URL = workspaceA) -> [CacheVolume] {
+    CacheVolumes.forToolchain(toolchain, scope: .shared, workspace: workspace)
+}
+
 @Test func rustGetsCargoRegistryAndGitCaches() {
-    let volumes = CacheVolumes.forToolchain(.rust)
+    let volumes = privateCaches(.rust)
     #expect(volumes.contains { $0.guestPath == "/opt/rust/cargo/registry" })
     #expect(volumes.contains { $0.guestPath == "/opt/rust/cargo/git" })
 }
 
 @Test func goGetsModuleCache() {
-    #expect(CacheVolumes.forToolchain(.go).contains { $0.guestPath == "/opt/go/pkg/mod" })
+    #expect(privateCaches(.go).contains { $0.guestPath == "/opt/go/pkg/mod" })
 }
 
 @Test func jsGetsDenoAndNpmCaches() {
-    let volumes = CacheVolumes.forToolchain(.js)
+    let volumes = privateCaches(.js)
     #expect(volumes.contains { $0.guestPath == "/opt/js/deno-cache" })
     #expect(volumes.contains { $0.guestPath == "/home/coder/.npm" })
 }
 
 @Test func baseHasNoCacheVolumes() {
-    #expect(CacheVolumes.forToolchain(.base).isEmpty)
+    #expect(privateCaches(.base).isEmpty)
+    #expect(sharedCaches(.base).isEmpty)
 }
 
 @Test func cppHasNoCacheVolumes() {
-    #expect(CacheVolumes.forToolchain(.cpp).isEmpty)
+    #expect(privateCaches(.cpp).isEmpty)
+    #expect(sharedCaches(.cpp).isEmpty)
 }
 
 @Test func volumeNamesAreNamespacedAndStable() {
-    for volume in CacheVolumes.forToolchain(.rust) {
-        #expect(volume.name.hasPrefix("spawn-cache-"))
+    for scope in CacheScope.allCases {
+        for volume in CacheVolumes.forToolchain(.rust, scope: scope, workspace: workspaceA) {
+            #expect(volume.name.hasPrefix("spawn-cache-"))
+        }
     }
-    #expect(CacheVolumes.forToolchain(.rust) == CacheVolumes.forToolchain(.rust))
+    #expect(privateCaches(.rust) == privateCaches(.rust))
+}
+
+@Test func guestPathsAreTheSameWhicheverScopeIsUsed() {
+    // Scope changes who may read a cache, never where it is mounted: the guest
+    // paths are fixed by the toolchain templates.
+    for toolchain in Toolchain.allCases {
+        #expect(privateCaches(toolchain).map(\.guestPath) == sharedCaches(toolchain).map(\.guestPath))
+        #expect(privateCaches(toolchain, in: workspaceB).map(\.guestPath) == sharedCaches(toolchain).map(\.guestPath))
+    }
+}
+
+// MARK: - Cross-workspace isolation
+//
+// The security property this whole file exists for: a cache volume holds
+// dependency sources fetched with one workspace's credentials (cargo's git
+// cache can hold private repositories) and is mounted read-write, so under the
+// default scope no two workspaces may ever be handed the same volume name.
+
+@Test func twoWorkspacesNeverShareACacheVolumeUnderTheDefaultScope() {
+    var seen: Set<String> = []
+    var collided = false
+
+    for toolchain in Toolchain.allCases {
+        let namesA = privateCaches(toolchain, in: workspaceA).map(\.name)
+        let namesB = privateCaches(toolchain, in: workspaceB).map(\.name)
+
+        // Vacuity guard: an empty set of names would satisfy any disjointness
+        // claim, so the toolchains that do declare caches must produce some.
+        if toolchain == .rust || toolchain == .go || toolchain == .js {
+            #expect(!namesA.isEmpty)
+        }
+        #expect(namesA.count == namesB.count)
+        #expect(Set(namesA).isDisjoint(with: Set(namesB)))
+
+        for name in namesA + namesB {
+            collided = collided || !seen.insert(name).inserted
+        }
+    }
+
+    #expect(!collided, "a cache volume name is reused across workspaces or toolchains")
+}
+
+@Test func workspaceScopedNamesAreStableAcrossCalls() {
+    // Stability is what makes the cache a cache: a name that changed per call
+    // would create a fresh empty volume on every run.
+    for toolchain in Toolchain.allCases {
+        #expect(privateCaches(toolchain, in: workspaceB) == privateCaches(toolchain, in: workspaceB))
+    }
+    #expect(privateCaches(.rust).map(\.name) == privateCaches(.rust).map(\.name))
+}
+
+@Test func workspaceScopedNamesIgnorePathSpellingDifferences() {
+    // ~/code/app, ~/code/app/ and ~/code/./app are one workspace, so they must
+    // reach one cache rather than quietly starting a second.
+    let spellings = [
+        URL(fileURLWithPath: "/Users/me/code/project"),
+        URL(fileURLWithPath: "/Users/me/code/project/"),
+        URL(fileURLWithPath: "/Users/me/code/./project"),
+    ]
+    let expected = privateCaches(.rust, in: workspaceA).map(\.name)
+    for spelling in spellings {
+        #expect(privateCaches(.rust, in: spelling).map(\.name) == expected)
+    }
+}
+
+@Test func workspacesWithTheSameDirectoryNameStillGetDistinctCaches() {
+    // The slug alone would collide here; the path hash is what separates them.
+    let left = URL(fileURLWithPath: "/Users/me/work/api")
+    let right = URL(fileURLWithPath: "/Users/me/personal/api")
+    let leftNames = Set(privateCaches(.rust, in: left).map(\.name))
+    let rightNames = Set(privateCaches(.rust, in: right).map(\.name))
+
+    #expect(!leftNames.isEmpty)
+    #expect(leftNames.isDisjoint(with: rightNames))
+}
+
+@Test func workspaceScopedNamesCarryTheSameIdentityAsTheWorkspaceImage() {
+    // Reuse, not reimplementation: the cache key must be the key that names the
+    // workspace runtime image, so both agree on what "this workspace" is.
+    let key = WorkspaceIdentity.key(for: workspaceB.standardizedFileURL)
+    #expect(WorkspaceImageRuntime.imageName(for: workspaceB).contains(key))
+    for volume in privateCaches(.rust, in: workspaceB) {
+        #expect(volume.name.hasSuffix("-" + key))
+    }
+}
+
+// MARK: - Opt-in sharing
+
+@Test func sharedScopeGivesEveryWorkspaceTheSameVolumes() {
+    for toolchain in Toolchain.allCases {
+        #expect(sharedCaches(toolchain, in: workspaceA) == sharedCaches(toolchain, in: workspaceB))
+    }
+    #expect(!sharedCaches(.rust).isEmpty)
+}
+
+@Test func sharedScopeKeepsTheHistoricalGlobalVolumeNames() {
+    // Opting in must land on the volumes already on disk, or sharing would
+    // silently start from an empty cache. Exact equality, so this cannot be
+    // satisfied by a name that merely contains these strings.
+    #expect(Set(sharedCaches(.rust).map(\.name)) == ["spawn-cache-cargo-registry", "spawn-cache-cargo-git"])
+    #expect(Set(sharedCaches(.go).map(\.name)) == ["spawn-cache-go-mod"])
+    #expect(Set(sharedCaches(.js).map(\.name)) == ["spawn-cache-deno", "spawn-cache-npm"])
+}
+
+@Test func aPrivateCacheIsNeverTheSharedCache() {
+    for toolchain in Toolchain.allCases {
+        let privateNames = Set(privateCaches(toolchain).map(\.name))
+        let sharedNames = Set(sharedCaches(toolchain).map(\.name))
+        #expect(privateNames.isDisjoint(with: sharedNames))
+    }
 }
 
 @Test func anImageOverrideGetsNoCacheVolumes() {
@@ -40,48 +171,68 @@ import Testing
     // layout: mounting /opt/rust/cargo/{registry,git} into it would shadow
     // whatever lives there, and creating the volumes would cost a
     // create-and-roll-back on every run for a cache nothing ever populates.
-    #expect(CacheVolumes.forRun(toolchain: .rust, imageOverride: "ghcr.io/foo/bar").isEmpty)
+    #expect(
+        CacheVolumes.forRun(
+            toolchain: .rust, imageOverride: "ghcr.io/foo/bar", scope: .workspace, workspace: workspaceA
+        ).isEmpty
+    )
     for toolchain in Toolchain.allCases {
-        #expect(CacheVolumes.forRun(toolchain: toolchain, imageOverride: "custom:latest").isEmpty)
+        for scope in CacheScope.allCases {
+            #expect(
+                CacheVolumes.forRun(
+                    toolchain: toolchain, imageOverride: "custom:latest", scope: scope, workspace: workspaceA
+                ).isEmpty
+            )
+        }
     }
 }
 
 @Test func aRunWithoutAnImageOverrideGetsTheToolchainCaches() {
     // The guard above must subtract only the override case, or spawn-managed
-    // runs would silently stop caching.
+    // runs would silently stop caching — and the run must carry the scope and
+    // workspace through, or a run would mount volumes no other code names.
     for toolchain in Toolchain.allCases {
-        #expect(
-            CacheVolumes.forRun(toolchain: toolchain, imageOverride: nil)
-                == CacheVolumes.forToolchain(toolchain)
-        )
+        for scope in CacheScope.allCases {
+            for workspace in [workspaceA, workspaceB] {
+                #expect(
+                    CacheVolumes.forRun(
+                        toolchain: toolchain, imageOverride: nil, scope: scope, workspace: workspace
+                    ) == CacheVolumes.forToolchain(toolchain, scope: scope, workspace: workspace)
+                )
+            }
+        }
     }
-    #expect(!CacheVolumes.forRun(toolchain: .rust, imageOverride: nil).isEmpty)
+    #expect(
+        !CacheVolumes.forRun(toolchain: .rust, imageOverride: nil, scope: .workspace, workspace: workspaceA).isEmpty
+    )
+    // And a run in one workspace never names another workspace's volumes.
+    let runA = CacheVolumes.forRun(toolchain: .rust, imageOverride: nil, scope: .workspace, workspace: workspaceA)
+    let runB = CacheVolumes.forRun(toolchain: .rust, imageOverride: nil, scope: .workspace, workspace: workspaceB)
+    #expect(Set(runA.map(\.name)).isDisjoint(with: Set(runB.map(\.name))))
 }
 
 @Test func cacheVolumeNamesAreUniqueAcrossToolchains() {
-    let all = Toolchain.allCases.flatMap { CacheVolumes.forToolchain($0) }
-    let names = all.map(\.name)
-    #expect(Set(names).count == names.count)
+    for scope in CacheScope.allCases {
+        let all = Toolchain.allCases.flatMap { CacheVolumes.forToolchain($0, scope: scope, workspace: workspaceA) }
+        let names = all.map(\.name)
+        #expect(Set(names).count == names.count)
+    }
 }
 
 // MARK: - Volume preparation
 
 @Test func chownArgsRunAsRootAndMountEveryVolume() {
-    let volumes = CacheVolumes.forToolchain(.rust)
+    let volumes = privateCaches(.rust)
     let args = CacheVolumePreparation.chownArgs(image: "spawn-rust:latest", volumes: volumes)
 
     #expect(args.starts(with: ["run", "--rm", "--user", "root"]))
     let mounted = zip(args, args.dropFirst()).filter { $0.0 == "--volume" }.map(\.1)
-    #expect(
-        mounted == [
-            "spawn-cache-cargo-registry:/opt/rust/cargo/registry",
-            "spawn-cache-cargo-git:/opt/rust/cargo/git",
-        ]
-    )
+    #expect(mounted.count == 2)
+    #expect(mounted == volumes.map { "\($0.name):\($0.guestPath)" })
 }
 
 @Test func chownArgsGiveEveryVolumeToTheGuestUser() {
-    let volumes = CacheVolumes.forToolchain(.rust)
+    let volumes = privateCaches(.rust)
     let args = CacheVolumePreparation.chownArgs(image: "spawn-rust:latest", volumes: volumes)
 
     guard let command = args.last else {
@@ -97,7 +248,7 @@ import Testing
 
 @Test func chownArgsCoverEveryToolchainCachePath() {
     for toolchain in Toolchain.allCases {
-        let volumes = CacheVolumes.forToolchain(toolchain)
+        let volumes = privateCaches(toolchain)
         guard !volumes.isEmpty else { continue }
         guard let command = CacheVolumePreparation.chownArgs(image: "img", volumes: volumes).last else {
             Issue.record("chownArgs produced no command for \(toolchain.rawValue)")
@@ -150,9 +301,11 @@ import Testing
     }
 
     for toolchain in Toolchain.allCases {
-        for volume in CacheVolumes.forToolchain(toolchain) {
-            #expect(!seeded.contains(volume.guestPath))
-            #expect(!seeded.contains { volume.guestPath.hasPrefix($0 + "/") })
+        for scope in CacheScope.allCases {
+            for volume in CacheVolumes.forToolchain(toolchain, scope: scope, workspace: workspace) {
+                #expect(!seeded.contains(volume.guestPath))
+                #expect(!seeded.contains { volume.guestPath.hasPrefix($0 + "/") })
+            }
         }
     }
 }
@@ -225,7 +378,7 @@ private final class FakeVolumeStore: @unchecked Sendable {
 
 @Test func preparationCreatesAndChownsEveryMissingVolume() {
     let store = FakeVolumeStore()
-    let volumes = CacheVolumes.forToolchain(.rust)
+    let volumes = privateCaches(.rust)
 
     let usable = ContainerRunner.prepareCacheVolumes(
         volumes, image: "spawn-rust:latest", operations: store.operations
@@ -242,7 +395,7 @@ private final class FakeVolumeStore: @unchecked Sendable {
     // the next run would mount it root-owned and every build would fail.
     let store = FakeVolumeStore()
     store.failChown()
-    let volumes = CacheVolumes.forToolchain(.rust)
+    let volumes = privateCaches(.rust)
 
     let usable = ContainerRunner.prepareCacheVolumes(
         volumes, image: "spawn-rust:latest", operations: store.operations
@@ -258,7 +411,7 @@ private final class FakeVolumeStore: @unchecked Sendable {
     // volume behind, the next run sees them as missing and prepares them.
     let store = FakeVolumeStore()
     store.failChown()
-    let volumes = CacheVolumes.forToolchain(.rust)
+    let volumes = privateCaches(.rust)
 
     _ = ContainerRunner.prepareCacheVolumes(
         volumes, image: "spawn-rust:latest", operations: store.operations
@@ -273,7 +426,7 @@ private final class FakeVolumeStore: @unchecked Sendable {
 }
 
 @Test func failedCreateRollsBackTheVolumesAlreadyCreated() {
-    let volumes = CacheVolumes.forToolchain(.rust)
+    let volumes = privateCaches(.rust)
     guard volumes.count == 2 else {
         Issue.record("expected rust to declare two cache volumes")
         return
@@ -292,7 +445,7 @@ private final class FakeVolumeStore: @unchecked Sendable {
 }
 
 @Test func rollbackKeepsVolumesThatPredatedTheCall() {
-    let volumes = CacheVolumes.forToolchain(.rust)
+    let volumes = privateCaches(.rust)
     guard volumes.count == 2 else {
         Issue.record("expected rust to declare two cache volumes")
         return
@@ -310,7 +463,7 @@ private final class FakeVolumeStore: @unchecked Sendable {
 }
 
 @Test func alreadyPreparedVolumesAreNotTouched() {
-    let volumes = CacheVolumes.forToolchain(.rust)
+    let volumes = privateCaches(.rust)
     let store = FakeVolumeStore(existing: volumes.map(\.name))
 
     let usable = ContainerRunner.prepareCacheVolumes(
@@ -324,7 +477,7 @@ private final class FakeVolumeStore: @unchecked Sendable {
 @Test func preparationRepairsOwnershipOfVolumesItDidNotCreate() {
     // Chowning the whole set, not just the new volumes, costs nothing extra in
     // the same container and repairs a volume whose ownership drifted.
-    let volumes = CacheVolumes.forToolchain(.rust)
+    let volumes = privateCaches(.rust)
     guard volumes.count == 2 else {
         Issue.record("expected rust to declare two cache volumes")
         return
@@ -344,7 +497,7 @@ private final class FakeVolumeStore: @unchecked Sendable {
     let store = FakeVolumeStore()
     store.failChown()
     store.failDelete()
-    let volumes = CacheVolumes.forToolchain(.rust)
+    let volumes = privateCaches(.rust)
 
     let usable = ContainerRunner.prepareCacheVolumes(
         volumes, image: "spawn-rust:latest", operations: store.operations
@@ -357,7 +510,7 @@ private final class FakeVolumeStore: @unchecked Sendable {
     let store = FakeVolumeStore()
 
     let usable = ContainerRunner.prepareCacheVolumes(
-        CacheVolumes.forToolchain(.base), image: "spawn-base:latest", operations: store.operations
+        privateCaches(.base), image: "spawn-base:latest", operations: store.operations
     )
 
     #expect(usable.isEmpty)

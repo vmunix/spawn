@@ -467,6 +467,7 @@ extension Spawn {
         /// annotated rather than reported as a fault.
         static func cacheVolumeCheck(
             toolchain: Toolchain,
+            scope: CacheScope,
             volumes: [CacheVolume],
             exists: @Sendable (String) -> Bool = CacheVolumeOperations.containerCLI.exists
         ) -> Check {
@@ -485,7 +486,40 @@ extension Spawn {
             return Check(
                 status: .ok,
                 title: "Cache volumes",
-                detail: "\(toolchain.rawValue): \(described.joined(separator: ", "))"
+                detail: "\(toolchain.rawValue) [\(scope.rawValue) scope]: \(described.joined(separator: ", "))"
+            )
+        }
+
+        /// The cache volumes this workspace's runs would actually mount.
+        ///
+        /// Doctor must resolve the scope the same way a run does, or it would
+        /// name volumes no run ever touches. An unparseable `.spawn.toml` value
+        /// is reported rather than silently defaulted, because that is exactly
+        /// what a run would reject.
+        static func cacheCheck(
+            workspace: URL,
+            toolchain: Toolchain,
+            workspaceConfig: WorkspaceConfig?,
+            exists: @Sendable (String) -> Bool = CacheVolumeOperations.containerCLI.exists
+        ) -> Check {
+            let scopeName = RunRuntimePolicy.effectiveCacheScopeName(
+                cacheOverride: nil,
+                workspaceConfig: workspaceConfig
+            )
+            guard let scope = try? CacheScope.parse(scopeName) else {
+                let valid = CacheScope.allCases.map(\.rawValue).joined(separator: ", ")
+                return Check(
+                    status: .error,
+                    title: "Cache volumes",
+                    detail: ".spawn.toml [workspace] cache=\(scopeName) is not a cache scope. Use: \(valid)."
+                )
+            }
+
+            return cacheVolumeCheck(
+                toolchain: toolchain,
+                scope: scope,
+                volumes: CacheVolumes.forToolchain(toolchain, scope: scope, workspace: workspace),
+                exists: exists
             )
         }
 
@@ -724,9 +758,10 @@ extension Spawn {
             checks.append(Self.workspaceCheck(at: workspace))
             let cacheToolchain = inspection.toolchain ?? .base
             checks.append(
-                Self.cacheVolumeCheck(
+                Self.cacheCheck(
+                    workspace: workspace,
                     toolchain: cacheToolchain,
-                    volumes: CacheVolumes.forToolchain(cacheToolchain)
+                    workspaceConfig: workspaceConfig
                 ))
             checks.append(contentsOf: Self.stateChecks())
 

@@ -184,19 +184,47 @@ Language toolchains are installed under `/opt` (`/opt/rust`, `/opt/go`, `/opt/js
 
 Build caches persist automatically in named `container` volumes, mounted at run time, so downloads survive between runs without being baked into the image:
 
-| Toolchain | Volumes | Guest path |
-|-----------|---------|------------|
-| `rust` | `spawn-cache-cargo-registry`, `spawn-cache-cargo-git` | `/opt/rust/cargo/registry`, `/opt/rust/cargo/git` |
-| `go` | `spawn-cache-go-mod` | `/opt/go/pkg/mod` |
-| `js` | `spawn-cache-deno`, `spawn-cache-npm` | `/opt/js/deno-cache`, `/home/coder/.npm` |
+| Toolchain | Volumes (default, per workspace) | Guest path |
+|-----------|----------------------------------|------------|
+| `rust` | `spawn-cache-cargo-registry-<workspace>`, `spawn-cache-cargo-git-<workspace>` | `/opt/rust/cargo/registry`, `/opt/rust/cargo/git` |
+| `go` | `spawn-cache-go-mod-<workspace>` | `/opt/go/pkg/mod` |
+| `js` | `spawn-cache-deno-<workspace>`, `spawn-cache-npm-<workspace>` | `/opt/js/deno-cache`, `/home/coder/.npm` |
 | `base`, `cpp` | *(none)* | |
 
-spawn creates and mounts them on demand. `spawn doctor` lists the volumes for the detected toolchain. There is no `spawn cache` command; clear a cache with the `container` CLI, which recreates it empty on the next run:
+Caches are **per workspace by default**. `<workspace>` is a slug plus a hash of the workspace path, so each project gets its own volumes and no workspace can read or rewrite another's cached dependency sources. spawn creates and mounts them on demand. `spawn doctor` lists the volumes for the detected toolchain, including the scope in use.
+
+To trade that isolation for reuse, opt in per run or per workspace:
+
+```bash
+spawn --cache shared            # this run shares the global cache volumes
+```
+
+```toml
+# .spawn.toml
+[workspace]
+cache = "shared"
+```
+
+A shared cache is one set of volumes (`spawn-cache-cargo-registry`, etc.) mounted read-write into every workspace that opts in: each of them can read everything the others cached — including private dependency sources fetched by `cargo` into its git cache — and can modify what the others will build against next. Do not use `--cache shared` for untrusted repositories, or alongside workspaces with private dependencies. `--cache workspace` (the default) always wins over a repo's `.spawn.toml`.
+
+There is no `spawn cache` command; clear a cache with the `container` CLI, which recreates it empty on the next run:
 
 ```bash
 container volume ls
-container volume delete spawn-cache-cargo-registry
+container volume delete spawn-cache-cargo-registry-myproject-1a2b3c4d5e6f7890
 ```
+
+> **Upgrading:** builds before per-workspace caches used unscoped volume names. Nothing reads those now unless you opt into `--cache shared`, so remove them if you do not want them:
+>
+> ```bash
+> container volume delete spawn-cache-cargo-registry
+> container volume delete spawn-cache-cargo-git
+> container volume delete spawn-cache-go-mod
+> container volume delete spawn-cache-deno
+> container volume delete spawn-cache-npm
+> ```
+>
+> The next run repopulates the workspace-scoped caches from scratch.
 
 ### Managing containers
 
@@ -243,6 +271,7 @@ Add a `.spawn.toml` to your repo root to set workspace defaults:
 ```toml
 [workspace]
 agent = "codex"
+cache = "workspace"
 
 [toolchain]
 base = "rust"
@@ -251,9 +280,10 @@ base = "rust"
 Valid values:
 
 - `workspace.agent`: `claude-code`, `codex`
+- `workspace.cache`: `workspace` (default, caches private to this workspace), `shared`
 - `toolchain.base`: `base`, `cpp`, `rust`, `go`, `js`
 
-Repo config can set the default agent and toolchain preference. Host access still requires an explicit `--access ...` at launch time, even if `.spawn.toml` contains an `access` value.
+Repo config can set the default agent, build-cache scope, and toolchain preference. Host access still requires an explicit `--access ...` at launch time, even if `.spawn.toml` contains an `access` value. `--cache` overrides `workspace.cache` in both directions.
 
 spawn also reads `.devcontainer/devcontainer.json` to infer toolchains from images and features. If a viable devcontainer config is present, spawn prefers that explicit signal over repo-file heuristics. This makes existing VS Code devcontainer projects work with zero extra setup.
 

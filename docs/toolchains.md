@@ -68,27 +68,66 @@ All of these are already on `PATH` inside the container, so no setup is needed. 
 
 Build caches persist automatically between runs in named `container` volumes, mounted at run time. They are deliberately not baked into the image and not part of its home: they should survive between runs, but they are not user state. (`npm` is the exception to the path rule -- its cache keeps npm's default `$HOME/.npm` location, but it is still a mounted volume, not image content.)
 
-| Toolchain | Volume | Mounted at |
-|-----------|--------|------------|
-| `rust` | `spawn-cache-cargo-registry` | `/opt/rust/cargo/registry` |
-| `rust` | `spawn-cache-cargo-git` | `/opt/rust/cargo/git` |
-| `go` | `spawn-cache-go-mod` | `/opt/go/pkg/mod` |
-| `js` | `spawn-cache-deno` | `/opt/js/deno-cache` |
-| `js` | `spawn-cache-npm` | `/home/coder/.npm` |
+| Toolchain | Volume (default scope) | Mounted at |
+|-----------|------------------------|------------|
+| `rust` | `spawn-cache-cargo-registry-<workspace>` | `/opt/rust/cargo/registry` |
+| `rust` | `spawn-cache-cargo-git-<workspace>` | `/opt/rust/cargo/git` |
+| `go` | `spawn-cache-go-mod-<workspace>` | `/opt/go/pkg/mod` |
+| `js` | `spawn-cache-deno-<workspace>` | `/opt/js/deno-cache` |
+| `js` | `spawn-cache-npm-<workspace>` | `/home/coder/.npm` |
 | `base`, `cpp` | *(none)* | |
 
-spawn creates a missing volume on demand and hands it to the `coder` user before the first run uses it. `spawn doctor` lists the volumes for the detected toolchain, and `spawn doctor --json` includes the same line as a `checks[]` entry titled `Cache volumes`.
+spawn creates a missing volume on demand and hands it to the `coder` user before the first run uses it. `spawn doctor` lists the volumes for the detected toolchain and the scope they use, and `spawn doctor --json` includes the same line as a `checks[]` entry titled `Cache volumes`.
+
+## Cache scope
+
+A cache volume is mounted read-write and holds dependency sources fetched with the workspace's own credentials -- `cargo`'s git cache can contain private repositories. Caches are therefore **scoped to one workspace by default**: `<workspace>` above is a slug of the directory name plus a hash of its full path, the same identity that names a `--runtime workspace-image` image, so two projects never meet in one volume. Path spelling does not matter: `~/code/app`, `~/code/app/` and `~/code/./app` are one workspace.
+
+| Scope | Volume names | Who can read and write them |
+|-------|--------------|-----------------------------|
+| `workspace` (default) | `spawn-cache-cargo-registry-app-1a2b3c4d5e6f7890` | only runs in that workspace |
+| `shared` | `spawn-cache-cargo-registry` | every workspace that opts in |
+
+Opt into sharing per run or per workspace:
+
+```bash
+spawn --cache shared
+```
+
+```toml
+# .spawn.toml
+[workspace]
+cache = "shared"
+```
+
+Precedence is `--cache` > `.spawn.toml [workspace] cache` > `workspace`. The flag wins in both directions, so `--cache workspace` overrides a repo that asked to share.
+
+**A shared cache is a two-way channel.** Every workspace using it can read what the others cached -- including private dependency sources -- and can modify what they will build against on their next run. Use it only across projects you trust equally; never for an untrusted repository, and not alongside workspaces with private dependencies. spawn prints a note on every run that uses it.
 
 ### Clearing a cache
 
 There is no `spawn cache` command. Use the `container` CLI directly -- spawn recreates the volume, empty, on the next run:
 
 ```bash
-container volume ls                                  # inspect
-container volume delete spawn-cache-cargo-registry   # clear one
+container volume ls                                                     # inspect
+container volume delete spawn-cache-cargo-registry-app-1a2b3c4d5e6f7890 # clear one
 ```
 
-Deleting is also the recovery path if a volume was left unprepared: if a build fails with "permission denied" writing a cache path, run `container volume delete spawn-cache-<name>` and rerun -- spawn recreates the volume and hands it to the `coder` user again.
+Deleting is also the recovery path if a volume was left unprepared: if a build fails with "permission denied" writing a cache path, run `container volume delete <name>` (copy the name from `spawn doctor`) and rerun -- spawn recreates the volume and hands it to the `coder` user again.
+
+### Removing the old global volumes
+
+Before caches were scoped, every workspace shared one set of unscoped volumes. Those are now used only by `--cache shared`, so if you ran an earlier build and do not want them, delete them:
+
+```bash
+container volume delete spawn-cache-cargo-registry
+container volume delete spawn-cache-cargo-git
+container volume delete spawn-cache-go-mod
+container volume delete spawn-cache-deno
+container volume delete spawn-cache-npm
+```
+
+`container volume ls` shows which of them exist. The first run in each workspace repopulates its own caches.
 
 ### Upgrading existing images
 

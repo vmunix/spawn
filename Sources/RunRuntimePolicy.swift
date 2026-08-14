@@ -57,4 +57,27 @@ enum RunRuntimePolicy: Sendable {
 
         return AccessProfile.minimal.rawValue
     }
+
+    /// Resolves the cache scope for a run: `--cache` beats `.spawn.toml`, which
+    /// beats the private-by-default `workspace` scope.
+    ///
+    /// Unlike `access`, a repo-configured value is honoured rather than
+    /// downgraded: sharing a cache exposes only build artifacts fetched from
+    /// public registries — or, at worst, dependencies of the very repo that
+    /// asked to share — never host credentials. It is still announced, because
+    /// a shared cache is writable by every other workspace using it.
+    static func effectiveCacheScopeName(
+        cacheOverride: String?,
+        workspaceConfig: WorkspaceConfig?
+    ) -> String {
+        if let cacheOverride {
+            return cacheOverride
+        }
+
+        if let configured = workspaceConfig?.cacheName {
+            return configured
+        }
+
+        return CacheScope.workspace.rawValue
+    }
 }

@@ -25,8 +25,13 @@ import Testing
     #expect(help.contains("--access minimal"))
     #expect(help.contains("--runtime workspace-image"))
     #expect(help.contains("--rebuild-workspace-image"))
-    #expect(help.contains(".spawn.toml [workspace]        Default agent; access still requires --access"))
+    #expect(help.contains(".spawn.toml [workspace]        Default agent and cache scope; access still requires --access"))
     #expect(help.contains("Safe mode is the default."))
+    // Both scopes must be discoverable from help: the default is the safe one,
+    // and a user cannot opt into sharing they were never told about.
+    for scope in CacheScope.allCases {
+        #expect(help.contains("--cache \(scope.rawValue)"))
+    }
 }
 
 @Test func doctorHelpExplainsHumanAndJSONOutputs() {

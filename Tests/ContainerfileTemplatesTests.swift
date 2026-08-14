@@ -1,3 +1,4 @@
+import Foundation
 import Testing
 
 @testable import spawn
@@ -74,7 +75,10 @@ import Testing
     // the runtime create /opt/go/pkg root-owned unless the image owns it first.
     #expect(content.contains("RUN mkdir -p /opt/go/pkg/mod && chown -R coder:coder /opt/go"))
 
-    guard let mountPoint = CacheVolumes.forToolchain(.go).first?.guestPath else {
+    let goCaches = CacheVolumes.forToolchain(
+        .go, scope: .workspace, workspace: URL(fileURLWithPath: "/Users/me/code/project")
+    )
+    guard let mountPoint = goCaches.first?.guestPath else {
         Issue.record("go toolchain declares no cache volume")
         return
     }

@@ -50,6 +50,22 @@ expect_regex() {
   fi
 }
 
+expect_not_regex() {
+  local haystack="$1"
+  local pattern="$2"
+  local label="$3"
+
+  if printf '%s\n' "${haystack}" | grep -Eq "${pattern}"; then
+    printf '%s\n' "${haystack}" >&2
+    fail "${label} unexpectedly matched ${pattern}"
+  fi
+}
+
+# First cargo-registry cache volume named in doctor output, or empty.
+cargo_registry_volume() {
+  printf '%s\n' "$1" | grep -Eo 'spawn-cache-cargo-registry[a-z0-9-]*' | head -1
+}
+
 run_and_capture() {
   local label="$1"
   shift
@@ -80,8 +96,36 @@ run_and_capture "Doctor JSON reports workspace defaults" "${SPAWN_BIN}" doctor "
 expect_regex "${REPLY}" '"source"[[:space:]]*:[[:space:]]*"spawn-toml"' "rust doctor source"
 expect_regex "${REPLY}" '"agent"[[:space:]]*:[[:space:]]*"codex"' "rust doctor agent default"
 expect_regex "${REPLY}" '"access"[[:space:]]*:[[:space:]]*"minimal"' "rust doctor access default"
-expect_contains "${REPLY}" "spawn-cache-cargo-registry" "rust doctor cache volumes"
-expect_contains "${REPLY}" "spawn-cache-cargo-git" "rust doctor cache volumes"
+expect_regex "${REPLY}" 'rust \[workspace scope\]' "rust doctor cache scope"
+expect_regex "${REPLY}" 'spawn-cache-cargo-registry-rust-sample-[0-9a-f]+' "rust doctor cache volumes"
+expect_regex "${REPLY}" 'spawn-cache-cargo-git-rust-sample-[0-9a-f]+' "rust doctor cache volumes"
+# The global names belong to '--cache shared' only: a default run must never be
+# told it uses them.
+expect_not_regex "${REPLY}" 'spawn-cache-cargo-(registry|git)([^-]|$)' "rust doctor default cache scope"
+RUST_FIXTURE_CACHE="$(cargo_registry_volume "${REPLY}")"
+[[ -n "${RUST_FIXTURE_CACHE}" ]] || fail "rust doctor named no cargo registry cache volume"
+
+# Same project contents at another path: the caches must not be the same volumes,
+# or one workspace could read and rewrite another's dependency sources.
+CACHE_PROBE_DIR="$(mktemp -d)"
+trap 'rm -rf "${CACHE_PROBE_DIR}"' EXIT
+cp -R "${ROOT}/fixtures/rust-sample" "${CACHE_PROBE_DIR}/rust-sample"
+
+run_and_capture "Doctor JSON scopes caches to the workspace path" \
+  "${SPAWN_BIN}" doctor "${CACHE_PROBE_DIR}/rust-sample" --json
+PROBE_CACHE="$(cargo_registry_volume "${REPLY}")"
+[[ -n "${PROBE_CACHE}" ]] || fail "probe doctor named no cargo registry cache volume"
+[[ "${PROBE_CACHE}" != "${RUST_FIXTURE_CACHE}" ]] \
+  || fail "two workspaces were handed the same cache volume ${PROBE_CACHE}"
+
+# Opting in returns the global volumes, so an existing shared cache is reused.
+printf '[workspace]\ncache = "shared"\n\n[toolchain]\nbase = "rust"\n' \
+  >"${CACHE_PROBE_DIR}/rust-sample/.spawn.toml"
+run_and_capture "Doctor JSON honours an opt-in shared cache" \
+  "${SPAWN_BIN}" doctor "${CACHE_PROBE_DIR}/rust-sample" --json
+expect_regex "${REPLY}" 'rust \[shared scope\]' "shared cache scope"
+expect_regex "${REPLY}" 'spawn-cache-cargo-registry([^-]|$)' "shared cache volume name"
+expect_not_regex "${REPLY}" 'spawn-cache-cargo-registry-rust-sample' "shared scope must drop the workspace suffix"
 
 run_and_capture "Rust fixture: cwd default + passthrough command" \
   /bin/bash -lc "cd \"${ROOT}/fixtures/rust-sample\" && \"${SPAWN_BIN}\" -- cargo test"

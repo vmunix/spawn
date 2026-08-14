@@ -55,7 +55,8 @@ import Testing
     let workspaceConfig = WorkspaceConfig(
         toolchainName: nil,
         agentName: "codex",
-        accessName: "trusted"
+        accessName: "trusted",
+        cacheName: nil
     )
 
     #expect(
@@ -70,7 +71,8 @@ import Testing
     let workspaceConfig = WorkspaceConfig(
         toolchainName: nil,
         agentName: "codex",
-        accessName: "trusted"
+        accessName: "trusted",
+        cacheName: nil
     )
 
     #expect(
@@ -315,4 +317,95 @@ import Testing
     )
 
     #expect(lines.contains("  toolchain: go (--toolchain override)"))
+}
+
+// MARK: - Cache scope precedence
+//
+// Sharing a build cache is a cross-workspace read-write channel, so the default
+// must be the private one and every widening must be traceable to a request.
+
+@Test func cacheScopeDefaultsToTheWorkspacePrivateScope() throws {
+    let name = RunRuntimePolicy.effectiveCacheScopeName(cacheOverride: nil, workspaceConfig: nil)
+    #expect(try CacheScope.parse(name) == .workspace)
+
+    let configWithoutCache = WorkspaceConfig(
+        toolchainName: nil,
+        agentName: "codex",
+        accessName: "git",
+        cacheName: nil
+    )
+    #expect(
+        try CacheScope.parse(
+            RunRuntimePolicy.effectiveCacheScopeName(cacheOverride: nil, workspaceConfig: configWithoutCache)
+        ) == .workspace
+    )
+}
+
+@Test func cacheScopeFromWorkspaceConfigBeatsTheDefault() throws {
+    let config = WorkspaceConfig(toolchainName: nil, agentName: nil, accessName: nil, cacheName: "shared")
+
+    #expect(
+        try CacheScope.parse(
+            RunRuntimePolicy.effectiveCacheScopeName(cacheOverride: nil, workspaceConfig: config)
+        ) == .shared
+    )
+}
+
+@Test func cacheScopeFlagBeatsWorkspaceConfig() throws {
+    let sharedConfig = WorkspaceConfig(toolchainName: nil, agentName: nil, accessName: nil, cacheName: "shared")
+    let privateConfig = WorkspaceConfig(toolchainName: nil, agentName: nil, accessName: nil, cacheName: "workspace")
+
+    // The flag wins in both directions, so it can narrow a repo that asked to
+    // share as well as widen one that did not.
+    #expect(
+        try CacheScope.parse(
+            RunRuntimePolicy.effectiveCacheScopeName(cacheOverride: "workspace", workspaceConfig: sharedConfig)
+        ) == .workspace
+    )
+    #expect(
+        try CacheScope.parse(
+            RunRuntimePolicy.effectiveCacheScopeName(cacheOverride: "shared", workspaceConfig: privateConfig)
+        ) == .shared
+    )
+}
+
+@Test func anUnusableCacheScopeIsRejectedRatherThanDefaulted() {
+    // Falling back to a default here would mean a typo'd `--cache` silently ran
+    // with a scope the user never asked for.
+    let config = WorkspaceConfig(toolchainName: nil, agentName: nil, accessName: nil, cacheName: "everyone")
+
+    #expect(throws: ValidationError.self) {
+        try CacheScope.parse(
+            RunRuntimePolicy.effectiveCacheScopeName(cacheOverride: nil, workspaceConfig: config)
+        )
+    }
+    #expect(throws: ValidationError.self) {
+        try CacheScope.parse(
+            RunRuntimePolicy.effectiveCacheScopeName(cacheOverride: "everyone", workspaceConfig: nil)
+        )
+    }
+}
+
+@Test func theResolvedCacheScopeDecidesTheVolumesARunMounts() throws {
+    // End of the wire: precedence must reach the names, not just the enum.
+    let workspace = try makeTempDir(files: [:])
+    let config = WorkspaceConfig(toolchainName: nil, agentName: nil, accessName: nil, cacheName: "shared")
+
+    let fromConfig = try CacheScope.parse(
+        RunRuntimePolicy.effectiveCacheScopeName(cacheOverride: nil, workspaceConfig: config)
+    )
+    let fromFlag = try CacheScope.parse(
+        RunRuntimePolicy.effectiveCacheScopeName(cacheOverride: "workspace", workspaceConfig: config)
+    )
+
+    let sharedVolumes = CacheVolumes.forRun(
+        toolchain: .rust, imageOverride: nil, scope: fromConfig, workspace: workspace
+    )
+    let privateVolumes = CacheVolumes.forRun(
+        toolchain: .rust, imageOverride: nil, scope: fromFlag, workspace: workspace
+    )
+
+    #expect(!sharedVolumes.isEmpty)
+    #expect(Set(sharedVolumes.map(\.name)).isDisjoint(with: Set(privateVolumes.map(\.name))))
+    #expect(sharedVolumes == CacheVolumes.forToolchain(.rust, scope: .shared, workspace: workspace))
 }

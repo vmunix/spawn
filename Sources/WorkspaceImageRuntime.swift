@@ -327,10 +327,7 @@ enum WorkspaceImageRuntime: Sendable {
     }
 
     static func imageName(for workspace: URL) -> String {
-        let workspace = workspace.standardizedFileURL
-        let slug = sanitizedComponent(workspace.lastPathComponent)
-        let hash = fnv1a64Hex(workspace.path)
-        return "spawn-workspace-\(slug)-\(hash):latest"
+        "spawn-workspace-\(WorkspaceIdentity.key(for: workspace.standardizedFileURL)):latest"
     }
 
     static func requestedCacheStatus(
@@ -387,8 +384,7 @@ enum WorkspaceImageRuntime: Sendable {
     private static func cacheRecordURL(for workspace: URL, stateDir: URL) -> URL {
         let dir = stateDir.appendingPathComponent("workspace-images")
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        let key = sanitizedComponent(workspace.lastPathComponent) + "-" + fnv1a64Hex(workspace.path)
-        return dir.appendingPathComponent("\(key).json")
+        return dir.appendingPathComponent("\(WorkspaceIdentity.key(for: workspace)).json")
     }
 
     private static func validateBuildInputs(dockerfile: URL, context: URL) throws {
@@ -550,35 +546,4 @@ enum WorkspaceImageRuntime: Sendable {
         try data.write(to: plan.cacheRecord, options: Data.WritingOptions.atomic)
     }
 
-    private static func sanitizedComponent(_ value: String) -> String {
-        let lowercased = value.lowercased()
-        var result = ""
-        var previousWasDash = false
-
-        for scalar in lowercased.unicodeScalars {
-            let isAlphaNumeric =
-                (scalar.value >= 48 && scalar.value <= 57)
-                || (scalar.value >= 97 && scalar.value <= 122)
-            if isAlphaNumeric {
-                result.append(Character(scalar))
-                previousWasDash = false
-            } else if !previousWasDash {
-                result.append("-")
-                previousWasDash = true
-            }
-        }
-
-        let trimmed = result.trimmingCharacters(in: CharacterSet(charactersIn: "-"))
-        if trimmed.isEmpty { return "workspace" }
-        return String(trimmed.prefix(40))
-    }
-
-    private static func fnv1a64Hex(_ value: String) -> String {
-        var hash: UInt64 = 0xcbf2_9ce4_8422_2325
-        for byte in value.utf8 {
-            hash ^= UInt64(byte)
-            hash &*= 0x0000_0100_0000_01b3
-        }
-        return String(hash, radix: 16, uppercase: false)
-    }
 }

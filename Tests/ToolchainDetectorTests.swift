@@ -145,4 +145,35 @@ import Testing
     #expect(config?.agentName == "codex")
     #expect(config?.accessName == "git")
     #expect(config?.toolchain == .rust)
+    #expect(config?.cacheName == nil, "cache scope must not be inferred from an unrelated key")
+}
+
+@Test func loadsCacheScopeFromSpawnToml() throws {
+    let dir = try makeTempDir(files: [
+        ".spawn.toml": """
+        [workspace]
+        agent = "codex"
+        cache = "shared"
+        """
+    ])
+
+    let config = ToolchainDetector.loadWorkspaceConfig(in: dir)
+    #expect(config?.cacheName == "shared")
+    #expect(config?.cacheScope == .shared)
+}
+
+@Test func cacheScopeIsOnlyReadFromTheWorkspaceSection() throws {
+    // A `cache` key under [toolchain] is not the workspace cache scope; reading
+    // it there would let an unrelated key widen cache sharing.
+    let dir = try makeTempDir(files: [
+        ".spawn.toml": """
+        [toolchain]
+        base = "rust"
+        cache = "shared"
+        """
+    ])
+
+    let config = ToolchainDetector.loadWorkspaceConfig(in: dir)
+    #expect(config?.cacheName == nil)
+    #expect(config?.cacheScope == nil)
 }
