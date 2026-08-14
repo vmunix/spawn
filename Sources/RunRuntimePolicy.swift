@@ -59,13 +59,15 @@ enum RunRuntimePolicy: Sendable {
     }
 
     /// Resolves the cache scope for a run: `--cache` beats `.spawn.toml`, which
-    /// beats the private-by-default `workspace` scope.
+    /// may only narrow.
     ///
-    /// Unlike `access`, a repo-configured value is honoured rather than
-    /// downgraded: sharing a cache exposes only build artifacts fetched from
-    /// public registries — or, at worst, dependencies of the very repo that
-    /// asked to share — never host credentials. It is still announced, because
-    /// a shared cache is writable by every other workspace using it.
+    /// Repo-controlled config never widens exposure, the same rule `access`
+    /// follows. `shared` reaches into caches other workspaces wrote and lets
+    /// this one rewrite what they build against next — the cross-workspace
+    /// channel scoping exists to close — so only an explicit `--cache shared`
+    /// may select it. A repo asking for `workspace` is a narrowing and is
+    /// honoured silently; a repo asking for anything else is ignored, and
+    /// `ignoredConfiguredCacheScope` reports that so the user can be told.
     static func effectiveCacheScopeName(
         cacheOverride: String?,
         workspaceConfig: WorkspaceConfig?
@@ -74,10 +76,28 @@ enum RunRuntimePolicy: Sendable {
             return cacheOverride
         }
 
-        if let configured = workspaceConfig?.cacheName {
-            return configured
+        if workspaceConfig?.cacheScope == .workspace {
+            return CacheScope.workspace.rawValue
         }
 
         return CacheScope.workspace.rawValue
+    }
+
+    /// The wider cache scope a workspace asked for in `.spawn.toml` and did not
+    /// get, or `nil` when nothing was ignored.
+    ///
+    /// An unparseable value is not reported: it selected nothing, exactly as an
+    /// unparseable `access` value does.
+    static func ignoredConfiguredCacheScope(
+        cacheOverride: String?,
+        workspaceConfig: WorkspaceConfig?
+    ) -> CacheScope? {
+        guard cacheOverride == nil,
+            let configured = workspaceConfig?.cacheScope,
+            configured != .workspace
+        else {
+            return nil
+        }
+        return configured
     }
 }

@@ -83,26 +83,33 @@ spawn creates a missing volume on demand and hands it to the `coder` user before
 
 A cache volume is mounted read-write and holds dependency sources fetched with the workspace's own credentials -- `cargo`'s git cache can contain private repositories. Caches are therefore **scoped to one workspace by default**: `<workspace>` above is a slug of the directory name plus a hash of its full path, the same identity that names a `--runtime workspace-image` image, so two projects never meet in one volume. Path spelling does not matter: `~/code/app`, `~/code/app/` and `~/code/./app` are one workspace.
 
-| Scope | Volume names | Who can read and write them |
-|-------|--------------|-----------------------------|
-| `workspace` (default) | `spawn-cache-cargo-registry-app-1a2b3c4d5e6f7890` | only runs in that workspace |
-| `shared` | `spawn-cache-cargo-registry` | every workspace that opts in |
+| Scope | Volume names | Who can read and write them | How to select it |
+|-------|--------------|-----------------------------|------------------|
+| `workspace` (default) | `spawn-cache-cargo-registry-app-1a2b3c4d5e6f7890` | only runs in that workspace | default; `--cache workspace`; `.spawn.toml` |
+| `shared` | `spawn-cache-cargo-registry` | every workspace that opts in | `--cache shared` only |
 
-Opt into sharing per run or per workspace:
+Opt into sharing per run:
 
 ```bash
 spawn --cache shared
 ```
 
+**Only the flag can select `shared`.** Repo config may narrow but never widen, the same rule `access` follows: a `.spawn.toml` with
+
 ```toml
-# .spawn.toml
 [workspace]
 cache = "shared"
 ```
 
-Precedence is `--cache` > `.spawn.toml [workspace] cache` > `workspace`. The flag wins in both directions, so `--cache workspace` overrides a repo that asked to share.
+is ignored, the run stays workspace-scoped, and spawn says so:
 
-**A shared cache is a two-way channel.** Every workspace using it can read what the others cached -- including private dependency sources -- and can modify what they will build against on their next run. Use it only across projects you trust equally; never for an untrusted repository, and not alongside workspaces with private dependencies. spawn prints a note on every run that uses it.
+```
+Warning: ignoring .spawn.toml cache=shared. Pass '--cache shared' explicitly to opt into cross-workspace cache sharing.
+```
+
+`spawn doctor` reports the same, annotating the cache volumes line with `.spawn.toml cache=shared ignored`. Otherwise a repository you cloned could set the key itself and reach caches you had opted into sharing elsewhere -- a narrowed version of the very channel scoping exists to close. `cache = "workspace"` is a narrowing, so it is honoured silently.
+
+**A shared cache is a two-way channel.** Every workspace using it can read what the others cached -- including private dependency sources -- and can modify what they will build against on their next run. Use it only across projects you trust equally; never for an untrusted repository, and not alongside workspaces with private dependencies. spawn prints a note on every run that uses one.
 
 ### Clearing a cache
 

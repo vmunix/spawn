@@ -493,9 +493,10 @@ extension Spawn {
         /// The cache volumes this workspace's runs would actually mount.
         ///
         /// Doctor must resolve the scope the same way a run does, or it would
-        /// name volumes no run ever touches. An unparseable `.spawn.toml` value
-        /// is reported rather than silently defaulted, because that is exactly
-        /// what a run would reject.
+        /// name volumes no run ever touches. Because a run without `--cache`
+        /// can only land on the private scope, a `.spawn.toml` asking to share
+        /// is reported as ignored — the same shape as the access default, where
+        /// the config value is shown next to the flag that would honour it.
         static func cacheCheck(
             workspace: URL,
             toolchain: Toolchain,
@@ -506,20 +507,29 @@ extension Spawn {
                 cacheOverride: nil,
                 workspaceConfig: workspaceConfig
             )
-            guard let scope = try? CacheScope.parse(scopeName) else {
-                let valid = CacheScope.allCases.map(\.rawValue).joined(separator: ", ")
-                return Check(
-                    status: .error,
-                    title: "Cache volumes",
-                    detail: ".spawn.toml [workspace] cache=\(scopeName) is not a cache scope. Use: \(valid)."
-                )
-            }
-
-            return cacheVolumeCheck(
+            // Without an override the policy always resolves to a valid scope;
+            // the fallback keeps doctor from inventing one if that changes.
+            let scope = (try? CacheScope.parse(scopeName)) ?? .workspace
+            let check = cacheVolumeCheck(
                 toolchain: toolchain,
                 scope: scope,
                 volumes: CacheVolumes.forToolchain(toolchain, scope: scope, workspace: workspace),
                 exists: exists
+            )
+
+            let ignoredScope = RunRuntimePolicy.ignoredConfiguredCacheScope(
+                cacheOverride: nil,
+                workspaceConfig: workspaceConfig
+            )
+            guard let ignored = ignoredScope else {
+                return check
+            }
+
+            return Check(
+                status: check.status,
+                title: check.title,
+                detail: check.detail
+                    + " [.spawn.toml cache=\(ignored.rawValue) ignored; pass '--cache \(ignored.rawValue)' to opt in]"
             )
         }
 

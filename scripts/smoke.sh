@@ -118,14 +118,14 @@ PROBE_CACHE="$(cargo_registry_volume "${REPLY}")"
 [[ "${PROBE_CACHE}" != "${RUST_FIXTURE_CACHE}" ]] \
   || fail "two workspaces were handed the same cache volume ${PROBE_CACHE}"
 
-# Opting in returns the global volumes, so an existing shared cache is reused.
+# A repo cannot widen its own cache reach: only '--cache shared' may do that.
 printf '[workspace]\ncache = "shared"\n\n[toolchain]\nbase = "rust"\n' \
   >"${CACHE_PROBE_DIR}/rust-sample/.spawn.toml"
-run_and_capture "Doctor JSON honours an opt-in shared cache" \
+run_and_capture "Doctor JSON ignores a repo-configured shared cache" \
   "${SPAWN_BIN}" doctor "${CACHE_PROBE_DIR}/rust-sample" --json
-expect_regex "${REPLY}" 'rust \[shared scope\]' "shared cache scope"
-expect_regex "${REPLY}" 'spawn-cache-cargo-registry([^-]|$)' "shared cache volume name"
-expect_not_regex "${REPLY}" 'spawn-cache-cargo-registry-rust-sample' "shared scope must drop the workspace suffix"
+expect_regex "${REPLY}" 'rust \[workspace scope\]' "repo-configured sharing must not change the scope"
+expect_not_regex "${REPLY}" 'spawn-cache-cargo-(registry|git)([^-]|$)' "repo-configured sharing must not name a global volume"
+expect_regex "${REPLY}" 'cache=shared ignored' "doctor must report the ignored cache scope"
 
 run_and_capture "Rust fixture: cwd default + passthrough command" \
   /bin/bash -lc "cd \"${ROOT}/fixtures/rust-sample\" && \"${SPAWN_BIN}\" -- cargo test"

@@ -28,10 +28,10 @@ extension Spawn {
 
                 Build caches:
                   --cache workspace              Default; caches private to this workspace
-                  --cache shared                 Reuse one cache across every opted-in workspace
+                  --cache shared                 Reuse one cache across every opted-in workspace (flag only)
 
                 Workspace defaults:
-                  .spawn.toml [workspace]        Default agent and cache scope; access still requires --access
+                  .spawn.toml [workspace]        Default agent; access and cache sharing require flags
                   .spawn.toml [toolchain]        Default spawn-managed toolchain base
 
                 Other useful forms:
@@ -174,6 +174,12 @@ extension Spawn {
                     workspaceConfig: workspaceConfig
                 )
             )
+            if let ignoredCache = RunRuntimePolicy.ignoredConfiguredCacheScope(
+                cacheOverride: cache,
+                workspaceConfig: workspaceConfig
+            ) {
+                print("Warning: ignoring .spawn.toml cache=\(ignoredCache.rawValue). Pass '--cache \(ignoredCache.rawValue)' explicitly to opt into cross-workspace cache sharing.")
+            }
             if cacheScope == .shared {
                 print("Note: build caches are shared with every workspace using '--cache shared'; they are readable and writable by all of them.")
             }

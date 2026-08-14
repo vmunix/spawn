@@ -193,19 +193,15 @@ Build caches persist automatically in named `container` volumes, mounted at run 
 
 Caches are **per workspace by default**. `<workspace>` is a slug plus a hash of the workspace path, so each project gets its own volumes and no workspace can read or rewrite another's cached dependency sources. spawn creates and mounts them on demand. `spawn doctor` lists the volumes for the detected toolchain, including the scope in use.
 
-To trade that isolation for reuse, opt in per run or per workspace:
+To trade that isolation for reuse, opt in with the flag:
 
 ```bash
 spawn --cache shared            # this run shares the global cache volumes
 ```
 
-```toml
-# .spawn.toml
-[workspace]
-cache = "shared"
-```
+**Only the flag can select `shared`.** A repo's `.spawn.toml` cannot: `cache = "shared"` there is ignored with a warning, and the run stays workspace-scoped. Repo config may narrow (`cache = "workspace"`) but never widen — the same rule that applies to `access`, because a repo you cloned should not be able to reach the caches you share elsewhere.
 
-A shared cache is one set of volumes (`spawn-cache-cargo-registry`, etc.) mounted read-write into every workspace that opts in: each of them can read everything the others cached — including private dependency sources fetched by `cargo` into its git cache — and can modify what the others will build against next. Do not use `--cache shared` for untrusted repositories, or alongside workspaces with private dependencies. `--cache workspace` (the default) always wins over a repo's `.spawn.toml`.
+A shared cache is one set of volumes (`spawn-cache-cargo-registry`, etc.) mounted read-write into every workspace that opts in: each of them can read everything the others cached — including private dependency sources fetched by `cargo` into its git cache — and can modify what the others will build against next. Do not use `--cache shared` for untrusted repositories, or alongside workspaces with private dependencies.
 
 There is no `spawn cache` command; clear a cache with the `container` CLI, which recreates it empty on the next run:
 
@@ -271,7 +267,6 @@ Add a `.spawn.toml` to your repo root to set workspace defaults:
 ```toml
 [workspace]
 agent = "codex"
-cache = "workspace"
 
 [toolchain]
 base = "rust"
@@ -280,10 +275,10 @@ base = "rust"
 Valid values:
 
 - `workspace.agent`: `claude-code`, `codex`
-- `workspace.cache`: `workspace` (default, caches private to this workspace), `shared`
+- `workspace.cache`: `workspace` (default, caches private to this workspace); `shared` is ignored here — it requires `--cache shared`
 - `toolchain.base`: `base`, `cpp`, `rust`, `go`, `js`
 
-Repo config can set the default agent, build-cache scope, and toolchain preference. Host access still requires an explicit `--access ...` at launch time, even if `.spawn.toml` contains an `access` value. `--cache` overrides `workspace.cache` in both directions.
+Repo config can set the default agent and toolchain preference. Host access still requires an explicit `--access ...` at launch time, even if `.spawn.toml` contains an `access` value, and cross-workspace cache sharing likewise requires an explicit `--cache shared`.
 
 spawn also reads `.devcontainer/devcontainer.json` to infer toolchains from images and features. If a viable devcontainer config is present, spawn prefers that explicit signal over repo-file heuristics. This makes existing VS Code devcontainer projects work with zero extra setup.
 

@@ -371,7 +371,10 @@ private let cacheWorkspace = URL(fileURLWithPath: "/Users/me/code/project")
     }
 }
 
-@Test func doctorHonoursTheWorkspaceConfiguredCacheScope() throws {
+@Test func doctorReportsThePrivateVolumesWhenARepoAsksToShare() throws {
+    // A run without `--cache shared` uses the private volumes whatever the repo
+    // asked for, so doctor must name those — and say the request was ignored,
+    // or the two would disagree about what happens next.
     let workspace = try makeTempDir(files: [:])
     let config = WorkspaceConfig(toolchainName: nil, agentName: nil, accessName: nil, cacheName: "shared")
 
@@ -382,15 +385,43 @@ private let cacheWorkspace = URL(fileURLWithPath: "/Users/me/code/project")
         exists: { _ in true }
     )
 
-    for volume in CacheVolumes.forToolchain(.rust, scope: .shared, workspace: workspace) {
+    let mounted = CacheVolumes.forRun(
+        toolchain: .rust, imageOverride: nil, scope: .workspace, workspace: workspace
+    )
+    #expect(!mounted.isEmpty)
+    for volume in mounted {
         #expect(check.detail.contains(volume.name))
     }
-    for volume in CacheVolumes.forToolchain(.rust, scope: .workspace, workspace: workspace) {
-        #expect(!check.detail.contains(volume.name))
+    for volume in CacheVolumes.forToolchain(.rust, scope: .shared, workspace: workspace) {
+        #expect(!check.detail.contains(volume.name + ","))
+        #expect(!check.detail.hasSuffix(volume.name))
     }
+    #expect(check.detail.contains("ignored"))
 }
 
-@Test func doctorReportsAnUnusableCacheScopeRatherThanGuessing() throws {
+@Test func doctorSaysNothingAboutAnHonouredCacheScope() throws {
+    let workspace = try makeTempDir(files: [:])
+    let config = WorkspaceConfig(toolchainName: nil, agentName: nil, accessName: nil, cacheName: "workspace")
+
+    let check = Spawn.Doctor.cacheCheck(
+        workspace: workspace,
+        toolchain: .rust,
+        workspaceConfig: config,
+        exists: { _ in true }
+    )
+    let unset = Spawn.Doctor.cacheCheck(
+        workspace: workspace,
+        toolchain: .rust,
+        workspaceConfig: nil,
+        exists: { _ in true }
+    )
+
+    #expect(check.detail == unset.detail)
+}
+
+@Test func doctorIgnoresAnUnusableConfiguredCacheScope() throws {
+    // An unparseable value selects nothing, exactly as an unknown access value
+    // does, and leaves the private default in place.
     let workspace = try makeTempDir(files: [:])
     let config = WorkspaceConfig(toolchainName: nil, agentName: nil, accessName: nil, cacheName: "everyone")
 
@@ -401,9 +432,11 @@ private let cacheWorkspace = URL(fileURLWithPath: "/Users/me/code/project")
         exists: { _ in true }
     )
 
-    #expect(check.status == .error)
-    for scope in CacheScope.allCases {
-        #expect(check.detail.contains(scope.rawValue))
+    #expect(check.status == .ok)
+    for volume in CacheVolumes.forRun(
+        toolchain: .rust, imageOverride: nil, scope: .workspace, workspace: workspace
+    ) {
+        #expect(check.detail.contains(volume.name))
     }
 }
 

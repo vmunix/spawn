@@ -122,7 +122,7 @@ Cache volumes are mounted read-write and hold dependency sources fetched with th
 
 - `workspace` (default): names are suffixed with `WorkspaceIdentity.key(for:)` — the same slug-plus-path-hash that names a workspace-image — so two workspaces never share a volume
 - `shared`: the historical unscoped names, so opting in reuses volumes already on disk
-- precedence is `--cache` > `.spawn.toml [workspace] cache` > `workspace`
+- only `--cache shared` may select `shared`; `.spawn.toml [workspace] cache = "shared"` is ignored with a warning, exactly as a repo-supplied `access` elevation is. Repo config may narrow (`cache = "workspace"`), never widen
 - a shared cache is readable and writable by every workspace using it; a run that uses one says so
 
 `spawn doctor` must name the volumes the workspace would actually mount, resolving the scope the way a run does. Anything that names cache volumes goes through `CacheVolumes`, never by string-building a name.
