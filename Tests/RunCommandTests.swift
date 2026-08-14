@@ -447,3 +447,112 @@ import Testing
     #expect(configVolumes == CacheVolumes.forToolchain(.rust, scope: .workspace, workspace: workspace))
     #expect(flagVolumes == CacheVolumes.forToolchain(.rust, scope: .shared, workspace: workspace))
 }
+
+// MARK: - The volumes a run actually mounts
+//
+// `run()` passes its raw inputs to `RunRuntimePolicy.cacheVolumes` and mounts
+// exactly what comes back, so these assertions cover the launch path's cache
+// decision end to end. Before the helper existed, that decision lived inline in
+// `run()` and could only be exercised by starting a container: flipping it to
+// the shared scope — the original P1 — broke no test.
+
+@Test func aRunMountsWorkspaceScopedCachesByDefault() throws {
+    let workspace = try makeTempDir(files: [:])
+
+    let volumes = try RunRuntimePolicy.cacheVolumes(
+        cacheOverride: nil,
+        workspaceConfig: nil,
+        toolchain: .rust,
+        imageOverride: nil,
+        workspace: workspace
+    )
+
+    #expect(volumes == CacheVolumes.forToolchain(.rust, scope: .workspace, workspace: workspace))
+    #expect(!volumes.isEmpty)
+}
+
+@Test func aRunInAnotherWorkspaceMountsDifferentVolumes() throws {
+    let left = try makeTempDir(files: [:])
+    let right = try makeTempDir(files: [:])
+
+    let leftVolumes = try RunRuntimePolicy.cacheVolumes(
+        cacheOverride: nil, workspaceConfig: nil, toolchain: .rust, imageOverride: nil, workspace: left
+    )
+    let rightVolumes = try RunRuntimePolicy.cacheVolumes(
+        cacheOverride: nil, workspaceConfig: nil, toolchain: .rust, imageOverride: nil, workspace: right
+    )
+
+    #expect(!leftVolumes.isEmpty)
+    #expect(Set(leftVolumes.map(\.name)).isDisjoint(with: Set(rightVolumes.map(\.name))))
+}
+
+@Test func aRunMountsSharedCachesOnlyWhenTheFlagAsks() throws {
+    let workspace = try makeTempDir(files: [:])
+    let sharingRepo = WorkspaceConfig(toolchainName: nil, agentName: nil, accessName: nil, cacheName: "shared")
+
+    let withFlag = try RunRuntimePolicy.cacheVolumes(
+        cacheOverride: "shared", workspaceConfig: nil, toolchain: .rust, imageOverride: nil, workspace: workspace
+    )
+    let repoOnly = try RunRuntimePolicy.cacheVolumes(
+        cacheOverride: nil, workspaceConfig: sharingRepo, toolchain: .rust, imageOverride: nil, workspace: workspace
+    )
+
+    #expect(withFlag == CacheVolumes.forToolchain(.rust, scope: .shared, workspace: workspace))
+    #expect(repoOnly == CacheVolumes.forToolchain(.rust, scope: .workspace, workspace: workspace))
+    #expect(Set(withFlag.map(\.name)).isDisjoint(with: Set(repoOnly.map(\.name))))
+}
+
+@Test func aRunWithAnImageOverrideMountsNoCaches() throws {
+    let workspace = try makeTempDir(files: [:])
+
+    for scope in CacheScope.allCases {
+        #expect(
+            try RunRuntimePolicy.cacheVolumes(
+                cacheOverride: scope.rawValue,
+                workspaceConfig: nil,
+                toolchain: .rust,
+                imageOverride: "ghcr.io/foo/bar",
+                workspace: workspace
+            ).isEmpty
+        )
+    }
+}
+
+@Test func aRunWithAnUnusableCacheFlagMountsNothingAndFails() throws {
+    let workspace = try makeTempDir(files: [:])
+
+    #expect(throws: ValidationError.self) {
+        try RunRuntimePolicy.cacheVolumes(
+            cacheOverride: "everyone",
+            workspaceConfig: nil,
+            toolchain: .rust,
+            imageOverride: nil,
+            workspace: workspace
+        )
+    }
+}
+
+// MARK: - What a run tells the user about its cache scope
+
+@Test func aSharedRunSaysTheCacheIsSharedAndAnOrdinaryRunSaysNothing() {
+    #expect(RunLaunchSummary.cacheNotices(scope: .workspace, ignoredConfiguredScope: nil).isEmpty)
+
+    let shared = RunLaunchSummary.cacheNotices(scope: .shared, ignoredConfiguredScope: nil)
+    #expect(shared.count == 1)
+    #expect(shared.allSatisfy { $0.contains("--cache shared") })
+    #expect(shared.allSatisfy { $0.contains("readable and writable") })
+}
+
+@Test func aRunReportsTheRepoCacheScopeItRefused() {
+    let notices = RunLaunchSummary.cacheNotices(scope: .workspace, ignoredConfiguredScope: .shared)
+
+    #expect(notices.count == 1)
+    guard let warning = notices.first else {
+        Issue.record("no notice for an ignored cache scope")
+        return
+    }
+    // Same shape as the access warning: what was ignored, and the flag that
+    // would honour it.
+    #expect(warning.hasPrefix("Warning: ignoring .spawn.toml cache=shared."))
+    #expect(warning.contains("Pass '--cache shared' explicitly"))
+}

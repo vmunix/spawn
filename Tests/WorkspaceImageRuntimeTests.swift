@@ -57,6 +57,27 @@ import Testing
     #expect(image.hasSuffix(":latest"))
 }
 
+@Test func workspaceIdentityStandardizesWhateverTheCallerPassed() {
+    // Standardization belongs to the key, not to each call site: a caller that
+    // forgot would fork one workspace's identity — and its cache volumes — in
+    // two.
+    let spellings = [
+        fileURL("/Users/me/code/project"),
+        fileURL("/Users/me/code/project/"),
+        fileURL("/Users/me/code/./project"),
+        fileURL("/Users/me/code/other/../project"),
+    ]
+    guard let expected = spellings.first.map(WorkspaceIdentity.key(for:)) else {
+        Issue.record("no workspace spellings to compare")
+        return
+    }
+
+    for spelling in spellings {
+        #expect(WorkspaceIdentity.key(for: spelling) == expected)
+        #expect(WorkspaceImageRuntime.imageName(for: spelling) == WorkspaceImageRuntime.imageName(for: spellings[0]))
+    }
+}
+
 @Test func workspaceImageBuildArgsIncludeDockerfileAndContext() {
     let plan = WorkspaceImageRuntime.Plan(
         image: "spawn-workspace-demo:latest",

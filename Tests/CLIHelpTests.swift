@@ -12,7 +12,14 @@ import Testing
     #expect(help.contains("Runtime selection:"))
     #expect(help.contains("--runtime workspace-image"))
     #expect(help.contains("Workspace defaults:"))
-    #expect(help.contains(".spawn.toml [workspace]   Default agent; access still requires --access"))
+    #expect(help.contains(".spawn.toml [workspace]   Default agent; access and cache sharing require flags"))
+    // Every run option a user is likely to reach for must be discoverable from
+    // the front door, not only from `spawn help run`.
+    #expect(help.contains("Common run options:"))
+    for option in ["--yolo", "--access", "--cache", "--shell", "--toolchain"] {
+        #expect(help.contains(option), "root help no longer lists \(option)")
+    }
+    #expect(help.contains("--cache <scope>"))
     #expect(help.contains("Bare invocations and run-style options route to `spawn run`."))
     #expect(help.contains("Use `spawn -- <command...>` for passthrough workspace commands."))
     #expect(help.contains("spawn help run"))

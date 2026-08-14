@@ -11,11 +11,13 @@ import Foundation
 enum WorkspaceIdentity: Sendable {
     /// `<slug>-<hash>` for a workspace directory.
     ///
-    /// The caller decides whether to standardize the URL first; `imageName` and
-    /// the cache volume names do, so `~/code/app`, `~/code/app/` and
-    /// `~/code/./app` land on one key.
+    /// The URL is standardized here rather than by each caller, so `~/code/app`,
+    /// `~/code/app/` and `~/code/./app` always land on one key. Leaving that to
+    /// callers made every new call site a chance to fork a workspace's identity
+    /// in two.
     static func key(for workspace: URL) -> String {
-        sanitizedComponent(workspace.lastPathComponent) + "-" + fnv1a64Hex(workspace.path)
+        let workspace = workspace.standardizedFileURL
+        return sanitizedComponent(workspace.lastPathComponent) + "-" + fnv1a64Hex(workspace.path)
     }
 
     /// Lowercased, alphanumeric-with-dashes form of a single path component,

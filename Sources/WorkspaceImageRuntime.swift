@@ -327,7 +327,7 @@ enum WorkspaceImageRuntime: Sendable {
     }
 
     static func imageName(for workspace: URL) -> String {
-        "spawn-workspace-\(WorkspaceIdentity.key(for: workspace.standardizedFileURL)):latest"
+        "spawn-workspace-\(WorkspaceIdentity.key(for: workspace)):latest"
     }
 
     static func requestedCacheStatus(

@@ -281,6 +281,31 @@ import Testing
 /// volume-naming functions are pure.
 private let cacheWorkspace = URL(fileURLWithPath: "/Users/me/code/project")
 
+/// Whether a check's detail names exactly this volume.
+///
+/// Plain `contains` cannot answer that: every workspace-scoped name has a
+/// global name as its prefix. The lookahead requires the match to end at a
+/// name boundary, so `spawn-cache-cargo-registry` does not match inside
+/// `spawn-cache-cargo-registry-app-1a2b3c4d (not created yet)`.
+private func namesVolume(_ detail: String, _ name: String) -> Bool {
+    let pattern = NSRegularExpression.escapedPattern(for: name) + "(?![-A-Za-z0-9])"
+    return detail.range(of: pattern, options: .regularExpression) != nil
+}
+
+@Test func theVolumeNameMatcherRequiresAWholeName() {
+    // Guards the guard: the earlier `contains(name + ",")` / `hasSuffix(name)`
+    // pair let a global name slip through when it was followed by
+    // " (not created yet)", which is exactly how doctor renders a volume that
+    // does not exist yet.
+    let scoped = "rust [workspace scope]: spawn-cache-cargo-registry-app-1a2b (not created yet)"
+    #expect(!namesVolume(scoped, "spawn-cache-cargo-registry"))
+    #expect(namesVolume(scoped, "spawn-cache-cargo-registry-app-1a2b"))
+
+    let global = "rust [shared scope]: spawn-cache-cargo-registry (not created yet), spawn-cache-cargo-git"
+    #expect(namesVolume(global, "spawn-cache-cargo-registry"))
+    #expect(namesVolume(global, "spawn-cache-cargo-git"))
+}
+
 @Test func doctorReportsCacheVolumes() {
     let volumes = CacheVolumes.forToolchain(.rust, scope: .shared, workspace: cacheWorkspace)
     let check = Spawn.Doctor.cacheVolumeCheck(
@@ -362,12 +387,11 @@ private let cacheWorkspace = URL(fileURLWithPath: "/Users/me/code/project")
 
     #expect(!expected.isEmpty)
     for volume in expected {
-        #expect(check.detail.contains(volume.name))
+        #expect(namesVolume(check.detail, volume.name))
     }
     // And it must not advertise a volume this workspace never touches.
     for shared in CacheVolumes.forToolchain(.rust, scope: .shared, workspace: workspace) {
-        #expect(!check.detail.contains(shared.name + ","))
-        #expect(!check.detail.hasSuffix(shared.name))
+        #expect(!namesVolume(check.detail, shared.name))
     }
 }
 
@@ -390,11 +414,10 @@ private let cacheWorkspace = URL(fileURLWithPath: "/Users/me/code/project")
     )
     #expect(!mounted.isEmpty)
     for volume in mounted {
-        #expect(check.detail.contains(volume.name))
+        #expect(namesVolume(check.detail, volume.name))
     }
     for volume in CacheVolumes.forToolchain(.rust, scope: .shared, workspace: workspace) {
-        #expect(!check.detail.contains(volume.name + ","))
-        #expect(!check.detail.hasSuffix(volume.name))
+        #expect(!namesVolume(check.detail, volume.name))
     }
     #expect(check.detail.contains("ignored"))
 }

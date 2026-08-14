@@ -131,6 +131,30 @@ run_and_capture "Rust fixture: cwd default + passthrough command" \
   /bin/bash -lc "cd \"${ROOT}/fixtures/rust-sample\" && \"${SPAWN_BIN}\" -- cargo test"
 expect_contains "${REPLY}" "session: command (cargo, 1 arg)" "rust passthrough launch summary"
 
+# The real argv, not doctor's report of it: --verbose logs the container command
+# spawn execs, so this is the only check that proves what a run actually mounts.
+run_and_capture "Rust fixture: run argv mounts workspace-scoped caches" \
+  /bin/bash -lc "cd \"${ROOT}/fixtures/rust-sample\" && \"${SPAWN_BIN}\" --verbose -- true"
+expect_regex "${REPLY}" \
+  "--volume ${RUST_FIXTURE_CACHE}:/opt/rust/cargo/registry" "run must mount this workspace's cargo registry cache"
+expect_not_regex "${REPLY}" \
+  '--volume spawn-cache-cargo-(registry|git):' "a default run must not mount a global cache volume"
+expect_not_regex "${REPLY}" \
+  "--volume ${PROBE_CACHE}:" "a run must not mount another workspace's cache volume"
+
+# The flag is the only way to reach the global volumes, and it must still work.
+run_and_capture "Rust fixture: --cache shared mounts the global caches" \
+  /bin/bash -lc "cd \"${ROOT}/fixtures/rust-sample\" && \"${SPAWN_BIN}\" --verbose --cache shared -- true"
+expect_regex "${REPLY}" \
+  '--volume spawn-cache-cargo-registry:/opt/rust/cargo/registry' "--cache shared must mount the global cache"
+expect_contains "${REPLY}" "readable and writable" "--cache shared must warn about the sharing"
+expect_not_regex "${REPLY}" \
+  "--volume ${RUST_FIXTURE_CACHE}:" "--cache shared must not also mount the private cache"
+
+# Created by the probe above; the docs tell users to delete these, so smoke does too.
+"${CONTAINER_BIN}" volume delete spawn-cache-cargo-registry >/dev/null 2>&1 || true
+"${CONTAINER_BIN}" volume delete spawn-cache-cargo-git >/dev/null 2>&1 || true
+
 run_and_capture "Go fixture: explicit workspace + access profile" \
   "${SPAWN_BIN}" -C "${ROOT}/fixtures/go-sample" --access minimal -- /bin/bash -lc \
   'test ! -e /home/coder/.ssh && test ! -e /home/coder/.config/gh/hosts.yml && go version && go build ./... && go test -v ./... && echo "PASS: go-sample" && test -w /opt/go/pkg/mod && touch /opt/go/pkg/sumdb-probe'

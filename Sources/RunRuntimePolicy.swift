@@ -1,4 +1,5 @@
 import ArgumentParser
+import Foundation
 
 /// Centralizes runtime and access rules for workspace launches.
 enum RunRuntimePolicy: Sendable {
@@ -99,5 +100,30 @@ enum RunRuntimePolicy: Sendable {
             return nil
         }
         return configured
+    }
+
+    /// Every cache volume a run should mount, derived from the raw run inputs.
+    ///
+    /// `run()` used to resolve the scope and pass it to `CacheVolumes` at the
+    /// call site, which left the most security-critical argument in the program
+    /// — the scope a run actually mounts with — reachable only by launching a
+    /// container. Deriving it in one pure function puts it under unit test; the
+    /// launch path then has no cache decision of its own to get wrong.
+    static func cacheVolumes(
+        cacheOverride: String?,
+        workspaceConfig: WorkspaceConfig?,
+        toolchain: Toolchain,
+        imageOverride: String?,
+        workspace: URL
+    ) throws -> [CacheVolume] {
+        let scope = try CacheScope.parse(
+            effectiveCacheScopeName(cacheOverride: cacheOverride, workspaceConfig: workspaceConfig)
+        )
+        return CacheVolumes.forRun(
+            toolchain: toolchain,
+            imageOverride: imageOverride,
+            scope: scope,
+            workspace: workspace
+        )
     }
 }

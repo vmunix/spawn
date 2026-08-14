@@ -41,7 +41,7 @@ struct Spawn: AsyncParsableCommand {
               --rebuild-workspace-image Force a rebuild for workspace-image runs
 
             Workspace defaults:
-              .spawn.toml [workspace]   Default agent; access still requires --access
+              .spawn.toml [workspace]   Default agent; access and cache sharing require flags
               .spawn.toml [toolchain]   Default spawn-managed toolchain base
 
             Operational commands:
@@ -55,6 +55,7 @@ struct Spawn: AsyncParsableCommand {
             Common run options:
               --yolo                   Skip permission gates (default: safe mode)
               --access <name>          Host access profile (minimal/git/trusted)
+              --cache <scope>          Build cache scope (workspace/shared; default per workspace)
               --shell                  Drop into a shell instead of running an agent
               --toolchain <name>       Override toolchain (base/cpp/rust/go/js)
 

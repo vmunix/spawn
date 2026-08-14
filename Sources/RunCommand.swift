@@ -168,20 +168,23 @@ extension Spawn {
             if access == nil, let configuredAccess = workspaceConfig?.accessProfile, configuredAccess != .minimal {
                 print("Warning: ignoring .spawn.toml access=\(configuredAccess.rawValue). Pass '--access \(configuredAccess.rawValue)' explicitly to opt into host auth exposure.")
             }
+            // Parsed here only to reject a bad '--cache' before any container
+            // work and to pick the notices; the volumes a run mounts are
+            // derived by RunRuntimePolicy below.
             let cacheScope = try CacheScope.parse(
                 RunRuntimePolicy.effectiveCacheScopeName(
                     cacheOverride: cache,
                     workspaceConfig: workspaceConfig
                 )
             )
-            if let ignoredCache = RunRuntimePolicy.ignoredConfiguredCacheScope(
-                cacheOverride: cache,
-                workspaceConfig: workspaceConfig
+            for notice in RunLaunchSummary.cacheNotices(
+                scope: cacheScope,
+                ignoredConfiguredScope: RunRuntimePolicy.ignoredConfiguredCacheScope(
+                    cacheOverride: cache,
+                    workspaceConfig: workspaceConfig
+                )
             ) {
-                print("Warning: ignoring .spawn.toml cache=\(ignoredCache.rawValue). Pass '--cache \(ignoredCache.rawValue)' explicitly to opt into cross-workspace cache sharing.")
-            }
-            if cacheScope == .shared {
-                print("Note: build caches are shared with every workspace using '--cache shared'; they are readable and writable by all of them.")
+                print(notice)
             }
             let runtimeMode = try RuntimeMode.parse(runtime)
             try RunRuntimePolicy.validateOptions(
@@ -316,10 +319,14 @@ extension Spawn {
                 cpus: cpus,
                 memory: memory,
                 cacheVolumes: ContainerRunner.prepareCacheVolumes(
-                    CacheVolumes.forRun(
+                    // Resolved by RunRuntimePolicy, not here: the scope a run
+                    // mounts with is unit-tested there, and this path must not
+                    // hold a second, untested copy of that decision.
+                    try RunRuntimePolicy.cacheVolumes(
+                        cacheOverride: cache,
+                        workspaceConfig: workspaceConfig,
                         toolchain: resolvedToolchain,
                         imageOverride: image,
-                        scope: cacheScope,
                         workspace: path
                     ),
                     // The spawn-managed image for the toolchain, never

@@ -60,15 +60,15 @@ enum CacheVolumes: Sendable {
     ///
     /// The workspace identity comes from `WorkspaceIdentity`, the same
     /// derivation that names workspace runtime images, so a workspace's image
-    /// and its caches agree on what "this workspace" is — and a path is
-    /// standardized first, so `~/code/app` and `~/code/app/` share one cache
+    /// and its caches agree on what "this workspace" is — including its
+    /// standardization, so `~/code/app` and `~/code/app/` share one cache
     /// rather than silently starting a second.
     private static func nameSuffix(scope: CacheScope, workspace: URL) -> String {
         switch scope {
         case .shared:
             return ""
         case .workspace:
-            return "-" + WorkspaceIdentity.key(for: workspace.standardizedFileURL)
+            return "-" + WorkspaceIdentity.key(for: workspace)
         }
     }
 
