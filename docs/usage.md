@@ -194,7 +194,7 @@ spawn doctor --json     # Same report in machine-readable form
 ```
 
 `spawn doctor` reports local runtime readiness, the workspace image resolution, and, when `.spawn.toml` is present, the configured workspace values such as `agent` and `access`.
-It also names the build-cache volumes that this workspace would mount and the scope they use, and flags a `.spawn.toml` cache scope it had to ignore. See [Toolchains: cache scope](toolchains.md#cache-scope).
+It also names the build-cache directories that this workspace would mount and the scope they use, and flags a `.spawn.toml` cache scope it had to ignore. See [Toolchains: cache scope](toolchains.md#cache-scope).
 Use `-C/--cwd` to inspect another workspace without changing directories; a positional path still works for compatibility.
 For workspace-image runtimes it also shows cache state plus the tracked Dockerfile, optional `.dockerignore`, context, config, and cache-record paths.
 It also reports whether the local `container` services are running, whether a default kernel is installed, and whether Rosetta is available on Apple Silicon hosts. When the host is not ready, it points you at the usual first-machine fixes such as `container system start --enable-kernel-install`, `container system kernel set --recommended`, and `softwareupdate --install-rosetta --agree-to-license`.

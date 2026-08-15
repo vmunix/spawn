@@ -83,12 +83,13 @@ RunCommand.run()
   → ImageResolver.resolve()       # Map toolchain to image name for spawn-managed runtimes
   → MountResolver.resolve()       # Build mount list
   → EnvLoader.load/loadDefault()  # Load env vars
-  → ContainerRunner.prepareCacheVolumes()
-                                  # Create and chown missing build-cache volumes
-                                  # (skipped for --image; the only step that boots
-                                  # a container as root). Serialized against a
-                                  # concurrent spawn by a host flock on the volume
-                                  # set, released before the run starts.
+  → RunRuntimePolicy.cacheMounts()
+                                  # Resolve the build caches this run mounts:
+                                  # workspace-scoped unless --cache shared, none
+                                  # at all for --image
+  → CacheMounts.prepare()         # mkdir each host cache directory, appended to
+                                  # the mount list (VirtioFS maps them to the
+                                  # guest user, so no chown and no locking)
   → ContainerRunner.run()         # Launch container
 ```
 

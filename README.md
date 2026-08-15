@@ -178,41 +178,44 @@ Omit the toolchain to build all images. Base is built first since other images d
 
 Language toolchains are installed under `/opt` (`/opt/rust`, `/opt/go`, `/opt/js`), never in the container's `/home/coder`. The home holds user state only.
 
-> **Upgrading:** toolchains moved out of `/home/coder` into `/opt`, and the build caches mount at the new `/opt` paths. spawn cannot detect an image built before the move, so rebuild every image once with `spawn build`. Without the rebuild nothing fails loudly: spawn still creates and mounts the cache volumes and `spawn doctor` still lists them, but a stale image writes to the old in-home paths, so the caches stay empty — and a stale `spawn-go:latest`, which never set `GOPATH`, does not persist its module cache at all. If you hardcoded `/home/coder/.cargo` or `/home/coder/go` in a script or `.spawn.toml`, update those paths to `/opt/rust/cargo` and `/opt/go`.
+> **Upgrading:** toolchains moved out of `/home/coder` into `/opt`, and the build caches mount at the new `/opt` paths. spawn cannot detect an image built before the move, so rebuild every image once with `spawn build`. Without the rebuild nothing fails loudly: spawn still creates and mounts the cache directories and `spawn doctor` still lists them, but a stale image writes to the old in-home paths, so the caches stay empty — and a stale `spawn-go:latest`, which never set `GOPATH`, does not persist its module cache at all. If you hardcoded `/home/coder/.cargo` or `/home/coder/go` in a script or `.spawn.toml`, update those paths to `/opt/rust/cargo` and `/opt/go`.
 
 ### Build caches
 
-Build caches persist automatically in named `container` volumes, mounted at run time, so downloads survive between runs without being baked into the image:
+Build caches persist automatically in host directories under spawn's state directory, bind-mounted at run time, so downloads survive between runs without being baked into the image:
 
-| Toolchain | Volumes (default, per workspace) | Guest path |
-|-----------|----------------------------------|------------|
-| `rust` | `spawn-cache-cargo-registry-<workspace>`, `spawn-cache-cargo-git-<workspace>` | `/opt/rust/cargo/registry`, `/opt/rust/cargo/git` |
-| `go` | `spawn-cache-go-mod-<workspace>` | `/opt/go/pkg/mod` |
-| `js` | `spawn-cache-deno-<workspace>`, `spawn-cache-npm-<workspace>` | `/opt/js/deno-cache`, `/home/coder/.npm` |
+| Toolchain | Host directory (default, per workspace) | Guest path |
+|-----------|-----------------------------------------|------------|
+| `rust` | `caches/<workspace>/cargo-registry`, `caches/<workspace>/cargo-git` | `/opt/rust/cargo/registry`, `/opt/rust/cargo/git` |
+| `go` | `caches/<workspace>/go-mod` | `/opt/go/pkg/mod` |
+| `js` | `caches/<workspace>/deno`, `caches/<workspace>/npm` | `/opt/js/deno-cache`, `/home/coder/.npm` |
 | `base`, `cpp` | *(none)* | |
 
-Caches are **per workspace by default**. `<workspace>` is a slug plus a hash of the workspace path, so each project gets its own volumes and no workspace can read or rewrite another's cached dependency sources. spawn creates and mounts them on demand. `spawn doctor` lists the volumes for the detected toolchain, including the scope in use.
+They live under `$XDG_STATE_HOME/spawn/caches` (`~/.local/state/spawn/caches` by default). Caches are **per workspace by default**. `<workspace>` is a slug plus a hash of the workspace path, so each project gets its own directories and no workspace can read or rewrite another's cached dependency sources. spawn creates them on demand -- a `mkdir`, no container and no ownership fixup, because VirtioFS maps the mount to the guest user. `spawn doctor` lists the directories for the detected toolchain, including the scope in use.
 
-To trade that isolation for reuse, opt in with the flag:
+Concurrent runs are safe: any number of runs may mount the same cache directory at once.
+
+To trade workspace isolation for reuse, opt in with the flag:
 
 ```bash
-spawn --cache shared            # this run shares the global cache volumes
+spawn --cache shared            # this run uses caches/shared/...
 ```
 
 **Only the flag can select `shared`.** A repo's `.spawn.toml` cannot: `cache = "shared"` there is ignored with a warning, and the run stays workspace-scoped. Repo config may narrow (`cache = "workspace"`) but never widen — the same rule that applies to `access`, because a repo you cloned should not be able to reach the caches you share elsewhere.
 
-A shared cache is one set of volumes (`spawn-cache-cargo-registry`, etc.) mounted read-write into every workspace that opts in: each of them can read everything the others cached — including private dependency sources fetched by `cargo` into its git cache — and can modify what the others will build against next. Do not use `--cache shared` for untrusted repositories, or alongside workspaces with private dependencies.
+A shared cache is one set of directories (`caches/shared/cargo-registry`, etc.) mounted read-write into every workspace that opts in: each of them can read everything the others cached — including private dependency sources fetched by `cargo` into its git cache — and can modify what the others will build against next. Do not use `--cache shared` for untrusted repositories, or alongside workspaces with private dependencies.
 
-There is no `spawn cache` command; clear a cache with the `container` CLI, which recreates it empty on the next run:
+There is no `spawn cache` command; a cache is a directory, so delete it and the next run recreates it empty:
 
 ```bash
-container volume ls
-container volume delete spawn-cache-cargo-registry-myproject-1a2b3c4d5e6f7890
+ls ~/.local/state/spawn/caches
+rm -rf ~/.local/state/spawn/caches/myproject-1a2b3c4d5e6f7890
 ```
 
-> **Upgrading:** builds before per-workspace caches used unscoped volume names. Nothing reads those now unless you opt into `--cache shared`, so remove them if you do not want them:
+> **Upgrading:** caches used to be named `container` volumes. Nothing reads those now, so delete them once — each is a 512 GB sparse disk image, so this is also what reclaims the space:
 >
 > ```bash
+> container volume ls | grep spawn-cache-
 > container volume delete spawn-cache-cargo-registry
 > container volume delete spawn-cache-cargo-git
 > container volume delete spawn-cache-go-mod
@@ -220,7 +223,7 @@ container volume delete spawn-cache-cargo-registry-myproject-1a2b3c4d5e6f7890
 > container volume delete spawn-cache-npm
 > ```
 >
-> The next run repopulates the workspace-scoped caches from scratch.
+> Per-workspace volumes are named `spawn-cache-<cache>-<slug>-<hash>` and are deleted the same way. Contents are not migrated: the first run in each workspace repopulates the new host directory from scratch. See [docs/toolchains.md](docs/toolchains.md#build-caches) for why the mechanism changed.
 
 ### Managing containers
 

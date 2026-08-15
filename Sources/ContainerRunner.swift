@@ -93,8 +93,7 @@ enum ContainerRunner: Sendable {
         workdir: String,
         entrypoint: [String],
         cpus: Int,
-        memory: String,
-        cacheVolumes: [CacheVolume] = []
+        memory: String
     ) -> [String] {
         var args = ["run", "--rm", "-i"]
 
@@ -118,11 +117,6 @@ enum ContainerRunner: Sendable {
             args += ["--volume", spec]
         }
 
-        // Named cache volumes. `container` creates a missing volume on first use.
-        for volume in cacheVolumes {
-            args += ["--volume", "\(volume.name):\(volume.guestPath)"]
-        }
-
         // Environment (sorted for deterministic output)
         for (key, value) in env.sorted(by: { $0.key < $1.key }) {
             args += ["--env", "\(key)=\(value)"]
@@ -140,113 +134,6 @@ enum ContainerRunner: Sendable {
         return args
     }
 
-    /// Create any missing cache volumes and hand them to the guest user.
-    ///
-    /// A newly created named volume is root-owned, so the guest user cannot write
-    /// into it. Volumes are chowned once, at creation, from a throwaway root
-    /// container.
-    ///
-    /// The invariant this upholds is **a `spawn-cache-*` volume that exists on
-    /// disk has been chowned**, which is what makes the cheap existence check a
-    /// valid test for "already prepared". Any failure part-way through therefore
-    /// deletes the volumes this call created: a created-but-unchowned volume
-    /// would be indistinguishable from a prepared one on the next run, and would
-    /// then be mounted root-owned on every subsequent run, failing every build
-    /// with EACCES and never self-healing.
-    ///
-    /// That invariant only holds against *this* process, though: a second spawn
-    /// preparing the same volumes can be observed mid-preparation, when its
-    /// volumes exist and are not yet chowned. Preparation therefore runs under a
-    /// host lock keyed on the volume set — see `CacheVolumeLock` for the two
-    /// interleavings that produces and why the lock is host-side.
-    ///
-    /// - Returns: the volumes safe to mount. A volume that could not be prepared
-    ///   is dropped rather than mounted, so a run degrades to "no cache" instead
-    ///   of failing every build with permission errors.
-    static func prepareCacheVolumes(
-        _ volumes: [CacheVolume],
-        image: String,
-        operations: CacheVolumeOperations = .containerCLI,
-        lock: CacheVolumeLock = .hostFile()
-    ) -> [CacheVolume] {
-        guard !volumes.isEmpty else { return [] }
-
-        // The lock is taken before anything looks at a volume, and the check
-        // that decides is the one made under it. A lock-free "nothing is
-        // missing, we are done" fast path would reinstate the exact race this
-        // closes: existence proves preparation only while no peer is
-        // mid-preparation, and holding the lock is what establishes that. The
-        // lock costs an `open` and a syscall, so there is nothing to win by
-        // guessing first.
-        let release = lock.acquire(CacheVolumeLock.key(for: volumes))
-        if release == nil {
-            logger.warning(
-                "Could not serialize cache volume preparation; continuing without it. A spawn running concurrently on this workspace may leave a cache volume unwritable."
-            )
-        }
-        defer { release?() }
-
-        return prepareCacheVolumesLocked(volumes, image: image, operations: operations)
-    }
-
-    /// The body of `prepareCacheVolumes`, run under its lock. Split out so the
-    /// existence check cannot accidentally be hoisted above the acquisition.
-    private static func prepareCacheVolumesLocked(
-        _ volumes: [CacheVolume],
-        image: String,
-        operations: CacheVolumeOperations
-    ) -> [CacheVolume] {
-        let missing = volumes.filter { !operations.exists($0.name) }
-        guard !missing.isEmpty else { return volumes }
-
-        // Volumes that predate this call are prepared, by the invariant above,
-        // so they stay usable even if preparing the new ones fails.
-        let preexisting = volumes.filter { !missing.contains($0) }
-
-        var created: [CacheVolume] = []
-        func rollBack() -> [CacheVolume] {
-            for volume in created where !operations.delete(volume.name) {
-                logger.warning(
-                    "Could not remove the unprepared cache volume \(volume.name). Delete it with 'container volume delete \(volume.name)', or builds using it will fail with permission errors."
-                )
-            }
-            return preexisting
-        }
-
-        for volume in missing {
-            guard operations.create(volume.name) else {
-                logger.warning("Could not create cache volume \(volume.name); continuing without it")
-                return rollBack()
-            }
-            created.append(volume)
-        }
-
-        // Chown the whole set, not just the new volumes: it costs nothing extra
-        // in the same container and repairs any volume whose ownership drifted.
-        guard operations.chown(volumes, image) else {
-            logger.warning("Could not hand cache volumes to the guest user; continuing without them")
-            return rollBack()
-        }
-
-        return volumes
-    }
-
-    /// Run the container CLI with output discarded, returning the exit status.
-    private static func runQuiet(args: [String]) throws -> Int32 {
-        try preflight()
-        let binary = try resolvedContainerPath()
-
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: binary)
-        process.arguments = args
-        process.standardInput = FileHandle.nullDevice
-        process.standardOutput = FileHandle.nullDevice
-        process.standardError = FileHandle.nullDevice
-        try process.run()
-        process.waitUntilExit()
-        return process.terminationStatus
-    }
-
     /// Launch a container. Uses `execv` when stdin is a TTY (for direct terminal access),
     /// falls back to `Foundation.Process` with signal forwarding otherwise.
     static func run(
@@ -256,8 +143,7 @@ enum ContainerRunner: Sendable {
         workdir: String,
         entrypoint: [String],
         cpus: Int,
-        memory: String,
-        cacheVolumes: [CacheVolume] = []
+        memory: String
     ) throws -> Int32 {
         try preflight()
         let binary = try resolvedContainerPath()
@@ -265,8 +151,7 @@ enum ContainerRunner: Sendable {
         let args = buildArgs(
             image: image, mounts: mounts, env: env,
             workdir: workdir, entrypoint: entrypoint,
-            cpus: cpus, memory: memory,
-            cacheVolumes: cacheVolumes
+            cpus: cpus, memory: memory
         )
 
         let cmd = ([binary] + sanitizeForLogging(args)).joined(separator: " ")
@@ -383,25 +268,4 @@ enum ContainerRunner: Sendable {
         }
         return binary
     }
-
-    /// Run the container CLI with output discarded, reporting success only on a
-    /// zero exit status. A launch failure counts as failure, never as success.
-    fileprivate static func succeededQuietly(_ args: [String]) -> Bool {
-        guard let status = try? runQuiet(args: args) else { return false }
-        return status == 0
-    }
-}
-
-extension CacheVolumeOperations {
-    /// The real operations, backed by the `container volume` subcommands.
-    static let containerCLI = CacheVolumeOperations(
-        exists: { ContainerRunner.succeededQuietly(["volume", "inspect", $0]) },
-        create: { ContainerRunner.succeededQuietly(["volume", "create", $0]) },
-        delete: { ContainerRunner.succeededQuietly(["volume", "delete", $0]) },
-        chown: { volumes, image in
-            ContainerRunner.succeededQuietly(
-                CacheVolumePreparation.chownArgs(image: image, volumes: volumes)
-            )
-        }
-    )
 }

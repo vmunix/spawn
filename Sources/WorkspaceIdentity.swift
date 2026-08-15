@@ -5,7 +5,7 @@ import Foundation
 /// Two things spawn names per workspace — the workspace runtime image and the
 /// workspace-scoped build caches — must agree on what "this workspace" means,
 /// so the derivation lives here rather than being reimplemented per call site.
-/// The key pairs a readable slug (so a human can tell whose volume or image it
+/// The key pairs a readable slug (so a human can tell whose cache or image it
 /// is) with a hash of the full path (so two directories with the same last
 /// component do not collide).
 enum WorkspaceIdentity: Sendable {

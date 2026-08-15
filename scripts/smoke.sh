@@ -65,9 +65,16 @@ expect_not_regex() {
   fi
 }
 
-# First cargo-registry cache volume named in doctor output, or empty.
-cargo_registry_volume() {
-  printf '%s\n' "$1" | grep -Eo 'spawn-cache-cargo-registry[a-z0-9-]*' | head -1
+# Doctor's JSON escapes every forward slash (`\/`), so host paths only match
+# after unescaping. Applied to REPLY right after each doctor --json capture the
+# cache assertions read, never to run output, which is already plain text.
+unescape_json_slashes() {
+  printf '%s\n' "$1" | sed 's|\\/|/|g'
+}
+
+# First cargo-registry cache directory named in doctor output, or empty.
+cargo_registry_cache() {
+  printf '%s\n' "$1" | grep -Eo '/[^" ,]*/caches/[^" ,]+/cargo-registry' | head -1
 }
 
 run_and_capture() {
@@ -97,50 +104,56 @@ expect_contains "${REPLY}" "spawn-cpp" "spawn image list"
 expect_contains "${REPLY}" "spawn-js" "spawn image list"
 
 run_and_capture "Doctor JSON reports workspace defaults" "${SPAWN_BIN}" doctor "${ROOT}/fixtures/rust-sample" --json
+REPLY="$(unescape_json_slashes "${REPLY}")"
 expect_regex "${REPLY}" '"source"[[:space:]]*:[[:space:]]*"spawn-toml"' "rust doctor source"
 expect_regex "${REPLY}" '"agent"[[:space:]]*:[[:space:]]*"codex"' "rust doctor agent default"
 expect_regex "${REPLY}" '"access"[[:space:]]*:[[:space:]]*"minimal"' "rust doctor access default"
 expect_regex "${REPLY}" 'rust \[workspace scope\]' "rust doctor cache scope"
-expect_regex "${REPLY}" 'spawn-cache-cargo-registry-rust-sample-[0-9a-f]+' "rust doctor cache volumes"
-expect_regex "${REPLY}" 'spawn-cache-cargo-git-rust-sample-[0-9a-f]+' "rust doctor cache volumes"
-# The global names belong to '--cache shared' only: a default run must never be
-# told it uses them.
-expect_not_regex "${REPLY}" 'spawn-cache-cargo-(registry|git)([^-]|$)' "rust doctor default cache scope"
-RUST_FIXTURE_CACHE="$(cargo_registry_volume "${REPLY}")"
-[[ -n "${RUST_FIXTURE_CACHE}" ]] || fail "rust doctor named no cargo registry cache volume"
+expect_regex "${REPLY}" '/caches/rust-sample-[0-9a-f]+/cargo-registry' "rust doctor cache directories"
+expect_regex "${REPLY}" '/caches/rust-sample-[0-9a-f]+/cargo-git' "rust doctor cache directories"
+# The shared directory belongs to '--cache shared' only: a default run must
+# never be told it uses it.
+expect_not_regex "${REPLY}" '/caches/shared/' "rust doctor default cache scope"
+RUST_FIXTURE_CACHE="$(cargo_registry_cache "${REPLY}")"
+[[ -n "${RUST_FIXTURE_CACHE}" ]] || fail "rust doctor named no cargo registry cache directory"
+# <state>/caches/shared, derived rather than hardcoded so this follows
+# XDG_STATE_HOME wherever the run puts it.
+SHARED_CACHE_DIR="$(dirname "$(dirname "${RUST_FIXTURE_CACHE}")")/shared"
 
-# Same project contents at another path: the caches must not be the same volumes,
-# or one workspace could read and rewrite another's dependency sources.
+# Same project contents at another path: the caches must not be the same
+# directories, or one workspace could read and rewrite another's dependency
+# sources.
 CACHE_PROBE_DIR="$(mktemp -d)"
-# Global cache volumes this run creates, deleted on the way out. Only ones this
-# run created: a user upgrading from the pre-scoping build has real content in
-# exactly those names, and smoke must not wipe it. In the trap, so a failing
-# assertion between here and the end does not leak them either.
-SMOKE_CREATED_VOLUMES=()
+# The shared cache directory is removed on the way out only if this run created
+# it: a user who has really opted into '--cache shared' has content there, and
+# smoke must not wipe it. In the trap, so a failing assertion between here and
+# the end does not leak it either.
+SMOKE_CREATED_SHARED_CACHE=0
 cleanup_cache_probe() {
   rm -rf "${CACHE_PROBE_DIR}"
-  local volume
-  for volume in ${SMOKE_CREATED_VOLUMES+"${SMOKE_CREATED_VOLUMES[@]}"}; do
-    "${CONTAINER_BIN}" volume delete "${volume}" >/dev/null 2>&1 || true
-  done
+  if [[ "${SMOKE_CREATED_SHARED_CACHE}" == "1" && "${SHARED_CACHE_DIR}" == */caches/shared ]]; then
+    rm -rf "${SHARED_CACHE_DIR}"
+  fi
 }
 trap cleanup_cache_probe EXIT
 cp -R "${ROOT}/fixtures/rust-sample" "${CACHE_PROBE_DIR}/rust-sample"
 
 run_and_capture "Doctor JSON scopes caches to the workspace path" \
   "${SPAWN_BIN}" doctor "${CACHE_PROBE_DIR}/rust-sample" --json
-PROBE_CACHE="$(cargo_registry_volume "${REPLY}")"
-[[ -n "${PROBE_CACHE}" ]] || fail "probe doctor named no cargo registry cache volume"
+REPLY="$(unescape_json_slashes "${REPLY}")"
+PROBE_CACHE="$(cargo_registry_cache "${REPLY}")"
+[[ -n "${PROBE_CACHE}" ]] || fail "probe doctor named no cargo registry cache directory"
 [[ "${PROBE_CACHE}" != "${RUST_FIXTURE_CACHE}" ]] \
-  || fail "two workspaces were handed the same cache volume ${PROBE_CACHE}"
+  || fail "two workspaces were handed the same cache directory ${PROBE_CACHE}"
 
 # A repo cannot widen its own cache reach: only '--cache shared' may do that.
 printf '[workspace]\ncache = "shared"\n\n[toolchain]\nbase = "rust"\n' \
   >"${CACHE_PROBE_DIR}/rust-sample/.spawn.toml"
 run_and_capture "Doctor JSON ignores a repo-configured shared cache" \
   "${SPAWN_BIN}" doctor "${CACHE_PROBE_DIR}/rust-sample" --json
+REPLY="$(unescape_json_slashes "${REPLY}")"
 expect_regex "${REPLY}" 'rust \[workspace scope\]' "repo-configured sharing must not change the scope"
-expect_not_regex "${REPLY}" 'spawn-cache-cargo-(registry|git)([^-]|$)' "repo-configured sharing must not name a global volume"
+expect_not_regex "${REPLY}" '/caches/shared/' "repo-configured sharing must not name the shared cache"
 expect_regex "${REPLY}" 'cache=shared ignored' "doctor must report the ignored cache scope"
 
 run_and_capture "Rust fixture: cwd default + passthrough command" \
@@ -154,26 +167,30 @@ run_and_capture "Rust fixture: run argv mounts workspace-scoped caches" \
 expect_regex "${REPLY}" \
   "--volume ${RUST_FIXTURE_CACHE}:/opt/rust/cargo/registry" "run must mount this workspace's cargo registry cache"
 expect_not_regex "${REPLY}" \
-  '--volume spawn-cache-cargo-(registry|git):' "a default run must not mount a global cache volume"
+  '--volume [^ ]*/caches/shared/' "a default run must not mount the shared cache"
 expect_not_regex "${REPLY}" \
-  "--volume ${PROBE_CACHE}:" "a run must not mount another workspace's cache volume"
+  "--volume ${PROBE_CACHE}:" "a run must not mount another workspace's cache directory"
+# The mount is only real if the host directory is: spawn creates it before the
+# launch, and the guest writes into it.
+[[ -d "${RUST_FIXTURE_CACHE}" ]] \
+  || fail "spawn mounted ${RUST_FIXTURE_CACHE} without creating it on the host"
 
-# The flag is the only way to reach the global volumes, and it must still work.
-# Record which globals are absent first: those are the ones this run creates and
-# is therefore allowed to delete afterwards.
-for volume in spawn-cache-cargo-registry spawn-cache-cargo-git; do
-  if ! "${CONTAINER_BIN}" volume inspect "${volume}" >/dev/null 2>&1; then
-    SMOKE_CREATED_VOLUMES+=("${volume}")
-  fi
-done
+# The flag is the only way to reach the shared cache, and it must still work.
+# Record whether it is absent first: if so, this run creates it and is therefore
+# allowed to delete it afterwards.
+if [[ ! -d "${SHARED_CACHE_DIR}" ]]; then
+  SMOKE_CREATED_SHARED_CACHE=1
+fi
 
-run_and_capture "Rust fixture: --cache shared mounts the global caches" \
+run_and_capture "Rust fixture: --cache shared mounts the shared caches" \
   /bin/bash -lc "cd \"${ROOT}/fixtures/rust-sample\" && \"${SPAWN_BIN}\" --verbose --cache shared -- true"
 expect_regex "${REPLY}" \
-  '--volume spawn-cache-cargo-registry:/opt/rust/cargo/registry' "--cache shared must mount the global cache"
+  "--volume ${SHARED_CACHE_DIR}/cargo-registry:/opt/rust/cargo/registry" "--cache shared must mount the shared cache"
 expect_contains "${REPLY}" "readable and writable" "--cache shared must warn about the sharing"
 expect_not_regex "${REPLY}" \
   "--volume ${RUST_FIXTURE_CACHE}:" "--cache shared must not also mount the private cache"
+[[ -d "${SHARED_CACHE_DIR}/cargo-registry" ]] \
+  || fail "spawn mounted ${SHARED_CACHE_DIR}/cargo-registry without creating it on the host"
 
 run_and_capture "Go fixture: explicit workspace + access profile" \
   "${SPAWN_BIN}" -C "${ROOT}/fixtures/go-sample" --access minimal -- /bin/bash -lc \

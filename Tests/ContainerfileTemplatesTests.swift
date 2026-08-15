@@ -71,15 +71,18 @@ import Testing
 
 @Test func goPreCreatesModuleCacheMountPoint() {
     let content = ContainerfileTemplates.content(for: .go)
-    // Anchored on the RUN line: a cache volume mounted at /opt/go/pkg/mod makes
-    // the runtime create /opt/go/pkg root-owned unless the image owns it first.
+    // Anchored on the RUN line: a cache mounted at /opt/go/pkg/mod makes the
+    // runtime create /opt/go/pkg root-owned unless the image owns it first.
     #expect(content.contains("RUN mkdir -p /opt/go/pkg/mod && chown -R coder:coder /opt/go"))
 
-    let goCaches = CacheVolumes.forToolchain(
-        .go, scope: .workspace, workspace: URL(fileURLWithPath: "/Users/me/code/project")
+    let goCaches = CacheMounts.forToolchain(
+        .go,
+        scope: .workspace,
+        workspace: URL(fileURLWithPath: "/Users/me/code/project"),
+        root: URL(fileURLWithPath: "/state/caches")
     )
     guard let mountPoint = goCaches.first?.guestPath else {
-        Issue.record("go toolchain declares no cache volume")
+        Issue.record("go toolchain declares no build cache")
         return
     }
     #expect(content.contains("mkdir -p \(mountPoint)"))

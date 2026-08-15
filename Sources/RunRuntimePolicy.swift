@@ -102,28 +102,30 @@ enum RunRuntimePolicy: Sendable {
         return configured
     }
 
-    /// Every cache volume a run should mount, derived from the raw run inputs.
+    /// Every build cache a run should mount, derived from the raw run inputs.
     ///
-    /// `run()` used to resolve the scope and pass it to `CacheVolumes` at the
+    /// `run()` used to resolve the scope and pass it to the cache layer at the
     /// call site, which left the most security-critical argument in the program
     /// — the scope a run actually mounts with — reachable only by launching a
     /// container. Deriving it in one pure function puts it under unit test; the
     /// launch path then has no cache decision of its own to get wrong.
-    static func cacheVolumes(
+    static func cacheMounts(
         cacheOverride: String?,
         workspaceConfig: WorkspaceConfig?,
         toolchain: Toolchain,
         imageOverride: String?,
-        workspace: URL
-    ) throws -> [CacheVolume] {
+        workspace: URL,
+        root: URL = CacheMounts.root()
+    ) throws -> [Mount] {
         let scope = try CacheScope.parse(
             effectiveCacheScopeName(cacheOverride: cacheOverride, workspaceConfig: workspaceConfig)
         )
-        return CacheVolumes.forRun(
+        return CacheMounts.forRun(
             toolchain: toolchain,
             imageOverride: imageOverride,
             scope: scope,
-            workspace: workspace
+            workspace: workspace,
+            root: root
         )
     }
 }

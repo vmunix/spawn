@@ -68,15 +68,15 @@ enum AccessProfile: String, CaseIterable, Sendable {
 /// Controls whether build caches are private to one workspace or shared across
 /// every workspace that opts in.
 ///
-/// The default is `workspace`: a cache volume holds dependency sources fetched
-/// with the workspace's own credentials — `cargo`'s git cache can hold private
+/// The default is `workspace`: a cache holds dependency sources fetched with
+/// the workspace's own credentials — `cargo`'s git cache can hold private
 /// repositories — and it is mounted read-write, so a shared cache is both a
 /// confidentiality and an integrity channel between unrelated workspaces.
 /// Sharing is therefore something a user asks for, not something they get.
 enum CacheScope: String, CaseIterable, Sendable {
-    /// Volume names carry the workspace identity, so no two workspaces meet.
+    /// Cache directories carry the workspace identity, so no two workspaces meet.
     case workspace
-    /// The unscoped, global volume names, shared by every opted-in workspace.
+    /// One cache directory, shared by every opted-in workspace.
     case shared
 
     /// Parse a cache scope name, throwing a clear error if invalid.
@@ -128,7 +128,7 @@ enum RuntimeMode: String, CaseIterable, Sendable {
 }
 
 /// A host-to-guest filesystem mount for the container.
-struct Mount: Sendable {
+struct Mount: Sendable, Equatable {
     let hostPath: String
     let guestPath: String
     let readOnly: Bool

@@ -453,47 +453,54 @@ extension Spawn {
             )
         }
 
-        /// Reports the named `container` volumes that hold a toolchain's build caches.
+        /// Reports the host directories that hold a toolchain's build caches.
         ///
         /// The caches deliberately live outside the image, and off every path spawn
         /// seeds into a home, so nothing in a workspace or a home reveals them —
         /// even the one that mounts inside the home (npm's `$HOME/.npm`). Naming
-        /// them here is what makes them inspectable (`container volume ls`) and
-        /// removable (`container volume delete <name>`).
+        /// their host paths here is what makes them inspectable (`ls`) and
+        /// removable (`rm -rf <path>`).
         ///
-        /// `exists` is the `CacheVolumeOperations` seam, injected so the check stays
-        /// pure and unit-testable. A volume that has not been created yet is normal
-        /// before a toolchain's first run — spawn creates it on demand — so it is
-        /// annotated rather than reported as a fault.
-        static func cacheVolumeCheck(
+        /// `exists` is injected so the check stays pure and unit-testable. A
+        /// directory that has not been created yet is normal before a toolchain's
+        /// first run — spawn creates it on demand — so it is annotated rather than
+        /// reported as a fault.
+        static func cacheMountCheck(
             toolchain: Toolchain,
             scope: CacheScope,
-            volumes: [CacheVolume],
-            exists: @Sendable (String) -> Bool = CacheVolumeOperations.containerCLI.exists
+            mounts: [Mount],
+            exists: @Sendable (String) -> Bool = Self.directoryExists
         ) -> Check {
-            guard !volumes.isEmpty else {
+            guard !mounts.isEmpty else {
                 return Check(
                     status: .ok,
-                    title: "Cache volumes",
+                    title: "Build caches",
                     detail: "\(toolchain.rawValue): none needed"
                 )
             }
 
-            let described = volumes.map { volume in
-                exists(volume.name) ? volume.name : "\(volume.name) (not created yet)"
+            let described = mounts.map { mount in
+                exists(mount.hostPath) ? mount.hostPath : "\(mount.hostPath) (not created yet)"
             }
 
             return Check(
                 status: .ok,
-                title: "Cache volumes",
+                title: "Build caches",
                 detail: "\(toolchain.rawValue) [\(scope.rawValue) scope]: \(described.joined(separator: ", "))"
             )
         }
 
-        /// The cache volumes this workspace's runs would actually mount.
+        /// Whether a host cache directory is already on disk.
+        static let directoryExists: @Sendable (String) -> Bool = { path in
+            var isDirectory: ObjCBool = false
+            let found = FileManager.default.fileExists(atPath: path, isDirectory: &isDirectory)
+            return found && isDirectory.boolValue
+        }
+
+        /// The build caches this workspace's runs would actually mount.
         ///
         /// Doctor must resolve the scope the same way a run does, or it would
-        /// name volumes no run ever touches. Because a run without `--cache`
+        /// name directories no run ever touches. Because a run without `--cache`
         /// can only land on the private scope, a `.spawn.toml` asking to share
         /// is reported as ignored — the same shape as the access default, where
         /// the config value is shown next to the flag that would honour it.
@@ -501,7 +508,8 @@ extension Spawn {
             workspace: URL,
             toolchain: Toolchain,
             workspaceConfig: WorkspaceConfig?,
-            exists: @Sendable (String) -> Bool = CacheVolumeOperations.containerCLI.exists
+            root: URL = CacheMounts.root(),
+            exists: @Sendable (String) -> Bool = Self.directoryExists
         ) -> Check {
             let scopeName = RunRuntimePolicy.effectiveCacheScopeName(
                 cacheOverride: nil,
@@ -510,10 +518,10 @@ extension Spawn {
             // Without an override the policy always resolves to a valid scope;
             // the fallback keeps doctor from inventing one if that changes.
             let scope = (try? CacheScope.parse(scopeName)) ?? .workspace
-            let check = cacheVolumeCheck(
+            let check = cacheMountCheck(
                 toolchain: toolchain,
                 scope: scope,
-                volumes: CacheVolumes.forToolchain(toolchain, scope: scope, workspace: workspace),
+                mounts: CacheMounts.forToolchain(toolchain, scope: scope, workspace: workspace, root: root),
                 exists: exists
             )
 

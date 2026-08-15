@@ -49,7 +49,7 @@ enum RunLaunchSummary: Sendable {
     ///
     /// Pure so the wording is under test: these two lines are the only signal a
     /// user gets that a repo asked to share caches and was refused, or that this
-    /// run is writing into volumes other workspaces can read.
+    /// run is writing into caches other workspaces can read.
     static func cacheNotices(scope: CacheScope, ignoredConfiguredScope: CacheScope?) -> [String] {
         var lines: [String] = []
 

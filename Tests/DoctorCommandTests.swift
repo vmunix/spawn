@@ -278,125 +278,159 @@ import Testing
 }
 
 /// A workspace path for cache-scope assertions. Never touched on disk: the
-/// volume-naming functions are pure.
+/// cache-path functions are pure.
 private let cacheWorkspace = URL(fileURLWithPath: "/Users/me/code/project")
 
-/// Whether a check's detail names exactly this volume.
+/// Cache root for the doctor cache checks, passed explicitly so they never
+/// derive a path from the real state directory.
+private let doctorCacheRoot = URL(fileURLWithPath: "/state/spawn/caches")
+
+/// Whether a check's detail names exactly this cache directory.
 ///
-/// Plain `contains` cannot answer that: every workspace-scoped name has a
-/// global name as its prefix. The lookahead requires the match to end at a
-/// name boundary, so `spawn-cache-cargo-registry` does not match inside
-/// `spawn-cache-cargo-registry-app-1a2b3c4d (not created yet)`.
-private func namesVolume(_ detail: String, _ name: String) -> Bool {
-    let pattern = NSRegularExpression.escapedPattern(for: name) + "(?![-A-Za-z0-9])"
+/// Plain `contains` cannot answer that: a cache root is a prefix of every cache
+/// under it, so `contains("/state/spawn/caches/shared")` is satisfied by a
+/// directory merely named `shared-2`. The lookahead requires the match to end at
+/// a path boundary, and still matches a directory doctor rendered as
+/// `<path> (not created yet)`.
+private func namesPath(_ detail: String, _ path: String) -> Bool {
+    let pattern = NSRegularExpression.escapedPattern(for: path) + "(?![-/A-Za-z0-9._])"
     return detail.range(of: pattern, options: .regularExpression) != nil
 }
 
-@Test func theVolumeNameMatcherRequiresAWholeName() {
-    // Guards the guard: the earlier `contains(name + ",")` / `hasSuffix(name)`
-    // pair let a global name slip through when it was followed by
-    // " (not created yet)", which is exactly how doctor renders a volume that
-    // does not exist yet.
-    let scoped = "rust [workspace scope]: spawn-cache-cargo-registry-app-1a2b (not created yet)"
-    #expect(!namesVolume(scoped, "spawn-cache-cargo-registry"))
-    #expect(namesVolume(scoped, "spawn-cache-cargo-registry-app-1a2b"))
+@Test func thePathMatcherRequiresAWholeDirectory() {
+    // Guards the guard: a matcher that accepted a prefix would report the shared
+    // cache as "named" by any detail listing a directory beside it.
+    let scoped = "rust [workspace scope]: /state/spawn/caches/project-1a2b/cargo-registry (not created yet)"
+    #expect(namesPath(scoped, "/state/spawn/caches/project-1a2b/cargo-registry"))
+    #expect(!namesPath(scoped, "/state/spawn/caches/project-1a2b"))
+    #expect(!namesPath(scoped, "/state/spawn/caches/shared/cargo-registry"))
 
-    let global = "rust [shared scope]: spawn-cache-cargo-registry (not created yet), spawn-cache-cargo-git"
-    #expect(namesVolume(global, "spawn-cache-cargo-registry"))
-    #expect(namesVolume(global, "spawn-cache-cargo-git"))
+    let shared = "rust [shared scope]: /state/spawn/caches/shared/cargo-registry, /state/spawn/caches/shared/cargo-git"
+    #expect(namesPath(shared, "/state/spawn/caches/shared/cargo-registry"))
+    #expect(namesPath(shared, "/state/spawn/caches/shared/cargo-git"))
 }
 
-@Test func doctorReportsCacheVolumes() {
-    let volumes = CacheVolumes.forToolchain(.rust, scope: .shared, workspace: cacheWorkspace)
-    let check = Spawn.Doctor.cacheVolumeCheck(
+@Test func doctorReportsBuildCaches() {
+    let caches = CacheMounts.forToolchain(.rust, scope: .shared, workspace: cacheWorkspace, root: doctorCacheRoot)
+    let check = Spawn.Doctor.cacheMountCheck(
         toolchain: .rust,
         scope: .shared,
-        volumes: volumes,
+        mounts: caches,
         exists: { _ in true }
     )
 
     #expect(check.status == .ok)
-    #expect(check.title == "Cache volumes")
-    #expect(check.detail == "rust [shared scope]: \(volumes.map(\.name).joined(separator: ", "))")
+    #expect(check.title == "Build caches")
+    #expect(check.detail == "rust [shared scope]: \(caches.map(\.hostPath).joined(separator: ", "))")
 }
 
-@Test func doctorMarksCacheVolumesThatDoNotExistYet() {
-    let volumes = CacheVolumes.forToolchain(.rust, scope: .workspace, workspace: cacheWorkspace)
-    let check = Spawn.Doctor.cacheVolumeCheck(
+@Test func doctorMarksBuildCachesThatDoNotExistYet() {
+    let caches = CacheMounts.forToolchain(.rust, scope: .workspace, workspace: cacheWorkspace, root: doctorCacheRoot)
+    let check = Spawn.Doctor.cacheMountCheck(
         toolchain: .rust,
         scope: .workspace,
-        volumes: volumes,
+        mounts: caches,
         exists: { _ in false }
     )
 
     #expect(check.status == .ok)
-    let described = volumes.map { "\($0.name) (not created yet)" }.joined(separator: ", ")
+    let described = caches.map { "\($0.hostPath) (not created yet)" }.joined(separator: ", ")
     #expect(check.detail == "rust [workspace scope]: \(described)")
 }
 
-@Test func doctorMarksOnlyTheMissingCacheVolume() {
-    let volumes = CacheVolumes.forToolchain(.rust, scope: .workspace, workspace: cacheWorkspace)
-    guard let present = volumes.first, let missing = volumes.last, volumes.count == 2 else {
-        Issue.record("expected rust to declare two cache volumes")
+@Test func doctorMarksOnlyTheMissingBuildCache() {
+    let caches = CacheMounts.forToolchain(.rust, scope: .workspace, workspace: cacheWorkspace, root: doctorCacheRoot)
+    guard let present = caches.first, let missing = caches.last, caches.count == 2 else {
+        Issue.record("expected rust to declare two caches")
         return
     }
-    let check = Spawn.Doctor.cacheVolumeCheck(
+    let check = Spawn.Doctor.cacheMountCheck(
         toolchain: .rust,
         scope: .workspace,
-        volumes: volumes,
-        exists: { $0 == present.name }
+        mounts: caches,
+        exists: { $0 == present.hostPath }
     )
 
-    #expect(check.detail == "rust [workspace scope]: \(present.name), \(missing.name) (not created yet)")
+    #expect(check.detail == "rust [workspace scope]: \(present.hostPath), \(missing.hostPath) (not created yet)")
 }
 
-@Test func doctorNamesEveryCacheVolumeOfAToolchain() {
+@Test func doctorNamesEveryBuildCacheOfAToolchain() {
     for toolchain in Toolchain.allCases {
         for scope in CacheScope.allCases {
-            let volumes = CacheVolumes.forToolchain(toolchain, scope: scope, workspace: cacheWorkspace)
-            let check = Spawn.Doctor.cacheVolumeCheck(
+            let caches = CacheMounts.forToolchain(
+                toolchain, scope: scope, workspace: cacheWorkspace, root: doctorCacheRoot
+            )
+            let check = Spawn.Doctor.cacheMountCheck(
                 toolchain: toolchain,
                 scope: scope,
-                volumes: volumes,
+                mounts: caches,
                 exists: { _ in true }
             )
-            for volume in volumes {
-                #expect(check.detail.contains(volume.name))
+            for cache in caches {
+                #expect(namesPath(check.detail, cache.hostPath))
             }
         }
     }
 }
 
-// MARK: - Doctor reports the volumes a run would really mount
+@Test func doctorReportsWhereACacheIsMounted() {
+    // The host path alone does not say what a run does with it. Doctor's own
+    // check on a real directory is what tells the user whether it exists.
+    let caches = CacheMounts.forToolchain(.js, scope: .workspace, workspace: cacheWorkspace, root: doctorCacheRoot)
+    let check = Spawn.Doctor.cacheMountCheck(
+        toolchain: .js,
+        scope: .workspace,
+        mounts: caches,
+        exists: Spawn.Doctor.directoryExists
+    )
 
-@Test func doctorNamesTheVolumesTheWorkspaceWouldActuallyMount() throws {
+    #expect(!caches.isEmpty)
+    // None of these temp-free paths exist, so every one must be annotated.
+    for cache in caches {
+        #expect(check.detail.contains("\(cache.hostPath) (not created yet)"))
+    }
+}
+
+@Test func doctorSeesACacheDirectoryThatExists() throws {
+    // The other half: `directoryExists` must actually distinguish. A file is not
+    // a cache directory either.
+    let base = try makeTempDir(files: ["not-a-directory": "x"])
+    #expect(Spawn.Doctor.directoryExists(base.path))
+    #expect(!Spawn.Doctor.directoryExists(base.appendingPathComponent("not-a-directory").path))
+    #expect(!Spawn.Doctor.directoryExists(base.appendingPathComponent("absent").path))
+}
+
+// MARK: - Doctor reports the caches a run would really mount
+
+@Test func doctorNamesTheCachesTheWorkspaceWouldActuallyMount() throws {
     // The reason this check exists: doctor once named the global volumes while
     // a run mounted workspace-scoped ones, so its output was decorative. The
     // expectation is computed from the run path, not written out by hand.
     let workspace = try makeTempDir(files: ["Cargo.toml": "[package]\nname = \"x\"\n"])
-    let expected = CacheVolumes.forRun(
-        toolchain: .rust, imageOverride: nil, scope: .workspace, workspace: workspace
+    let expected = CacheMounts.forRun(
+        toolchain: .rust, imageOverride: nil, scope: .workspace, workspace: workspace, root: doctorCacheRoot
     )
 
     let check = Spawn.Doctor.cacheCheck(
         workspace: workspace,
         toolchain: .rust,
         workspaceConfig: nil,
+        root: doctorCacheRoot,
         exists: { _ in true }
     )
 
     #expect(!expected.isEmpty)
-    for volume in expected {
-        #expect(namesVolume(check.detail, volume.name))
+    for cache in expected {
+        #expect(namesPath(check.detail, cache.hostPath))
     }
-    // And it must not advertise a volume this workspace never touches.
-    for shared in CacheVolumes.forToolchain(.rust, scope: .shared, workspace: workspace) {
-        #expect(!namesVolume(check.detail, shared.name))
+    // And it must not advertise a cache this workspace never touches.
+    for shared in CacheMounts.forToolchain(.rust, scope: .shared, workspace: workspace, root: doctorCacheRoot) {
+        #expect(!namesPath(check.detail, shared.hostPath))
     }
 }
 
-@Test func doctorReportsThePrivateVolumesWhenARepoAsksToShare() throws {
-    // A run without `--cache shared` uses the private volumes whatever the repo
+@Test func doctorReportsThePrivateCachesWhenARepoAsksToShare() throws {
+    // A run without `--cache shared` uses the private caches whatever the repo
     // asked for, so doctor must name those — and say the request was ignored,
     // or the two would disagree about what happens next.
     let workspace = try makeTempDir(files: [:])
@@ -406,20 +440,22 @@ private func namesVolume(_ detail: String, _ name: String) -> Bool {
         workspace: workspace,
         toolchain: .rust,
         workspaceConfig: config,
+        root: doctorCacheRoot,
         exists: { _ in true }
     )
 
-    let mounted = CacheVolumes.forRun(
-        toolchain: .rust, imageOverride: nil, scope: .workspace, workspace: workspace
+    let mounted = CacheMounts.forRun(
+        toolchain: .rust, imageOverride: nil, scope: .workspace, workspace: workspace, root: doctorCacheRoot
     )
     #expect(!mounted.isEmpty)
-    for volume in mounted {
-        #expect(namesVolume(check.detail, volume.name))
+    for cache in mounted {
+        #expect(namesPath(check.detail, cache.hostPath))
     }
-    for volume in CacheVolumes.forToolchain(.rust, scope: .shared, workspace: workspace) {
-        #expect(!namesVolume(check.detail, volume.name))
+    for cache in CacheMounts.forToolchain(.rust, scope: .shared, workspace: workspace, root: doctorCacheRoot) {
+        #expect(!namesPath(check.detail, cache.hostPath))
     }
-    #expect(check.detail.contains("ignored"))
+    #expect(check.detail.contains("cache=shared ignored"))
+    #expect(check.detail.contains("--cache shared"))
 }
 
 @Test func doctorSaysNothingAboutAnHonouredCacheScope() throws {
@@ -430,16 +466,19 @@ private func namesVolume(_ detail: String, _ name: String) -> Bool {
         workspace: workspace,
         toolchain: .rust,
         workspaceConfig: config,
+        root: doctorCacheRoot,
         exists: { _ in true }
     )
     let unset = Spawn.Doctor.cacheCheck(
         workspace: workspace,
         toolchain: .rust,
         workspaceConfig: nil,
+        root: doctorCacheRoot,
         exists: { _ in true }
     )
 
     #expect(check.detail == unset.detail)
+    #expect(!check.detail.contains("ignored"))
 }
 
 @Test func doctorIgnoresAnUnusableConfiguredCacheScope() throws {
@@ -452,22 +491,25 @@ private func namesVolume(_ detail: String, _ name: String) -> Bool {
         workspace: workspace,
         toolchain: .rust,
         workspaceConfig: config,
+        root: doctorCacheRoot,
         exists: { _ in true }
     )
 
     #expect(check.status == .ok)
-    for volume in CacheVolumes.forRun(
-        toolchain: .rust, imageOverride: nil, scope: .workspace, workspace: workspace
-    ) {
-        #expect(check.detail.contains(volume.name))
+    let expected = CacheMounts.forRun(
+        toolchain: .rust, imageOverride: nil, scope: .workspace, workspace: workspace, root: doctorCacheRoot
+    )
+    #expect(!expected.isEmpty)
+    for cache in expected {
+        #expect(namesPath(check.detail, cache.hostPath))
     }
 }
 
-@Test func doctorReportsNoCacheVolumesForBase() {
-    let check = Spawn.Doctor.cacheVolumeCheck(
+@Test func doctorReportsNoBuildCachesForBase() {
+    let check = Spawn.Doctor.cacheMountCheck(
         toolchain: .base,
         scope: .workspace,
-        volumes: [],
+        mounts: [],
         exists: { _ in false }
     )
 

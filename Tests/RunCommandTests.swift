@@ -421,9 +421,13 @@ import Testing
     #expect(RunRuntimePolicy.ignoredConfiguredCacheScope(cacheOverride: nil, workspaceConfig: config) == nil)
 }
 
-@Test func theResolvedCacheScopeDecidesTheVolumesARunMounts() throws {
-    // End of the wire: resolution must reach the names, not just the enum. A
-    // repo that asks to share gets the private volumes; the flag gets the
+/// Cache root for the resolution tests. Passed explicitly so they never derive
+/// a path from the real state directory.
+private let runCacheRoot = URL(fileURLWithPath: "/state/spawn/caches")
+
+@Test func theResolvedCacheScopeDecidesTheCachesARunMounts() throws {
+    // End of the wire: resolution must reach the host paths, not just the enum.
+    // A repo that asks to share gets the private caches; the flag gets the
     // shared ones, and the two sets never overlap.
     let workspace = try makeTempDir(files: [:])
     let config = WorkspaceConfig(toolchainName: nil, agentName: nil, accessName: nil, cacheName: "shared")
@@ -435,22 +439,24 @@ import Testing
         RunRuntimePolicy.effectiveCacheScopeName(cacheOverride: "shared", workspaceConfig: config)
     )
 
-    let configVolumes = CacheVolumes.forRun(
-        toolchain: .rust, imageOverride: nil, scope: fromConfig, workspace: workspace
+    let configCaches = CacheMounts.forRun(
+        toolchain: .rust, imageOverride: nil, scope: fromConfig, workspace: workspace, root: runCacheRoot
     )
-    let flagVolumes = CacheVolumes.forRun(
-        toolchain: .rust, imageOverride: nil, scope: fromFlag, workspace: workspace
+    let flagCaches = CacheMounts.forRun(
+        toolchain: .rust, imageOverride: nil, scope: fromFlag, workspace: workspace, root: runCacheRoot
     )
 
-    #expect(!configVolumes.isEmpty)
-    #expect(Set(configVolumes.map(\.name)).isDisjoint(with: Set(flagVolumes.map(\.name))))
-    #expect(configVolumes == CacheVolumes.forToolchain(.rust, scope: .workspace, workspace: workspace))
-    #expect(flagVolumes == CacheVolumes.forToolchain(.rust, scope: .shared, workspace: workspace))
+    #expect(!configCaches.isEmpty)
+    #expect(Set(configCaches.map(\.hostPath)).isDisjoint(with: Set(flagCaches.map(\.hostPath))))
+    #expect(
+        configCaches == CacheMounts.forToolchain(.rust, scope: .workspace, workspace: workspace, root: runCacheRoot)
+    )
+    #expect(flagCaches == CacheMounts.forToolchain(.rust, scope: .shared, workspace: workspace, root: runCacheRoot))
 }
 
-// MARK: - The volumes a run actually mounts
+// MARK: - The caches a run actually mounts
 //
-// `run()` passes its raw inputs to `RunRuntimePolicy.cacheVolumes` and mounts
+// `run()` passes its raw inputs to `RunRuntimePolicy.cacheMounts` and mounts
 // exactly what comes back, so these assertions cover the launch path's cache
 // decision end to end. Before the helper existed, that decision lived inline in
 // `run()` and could only be exercised by starting a container: flipping it to
@@ -459,47 +465,57 @@ import Testing
 @Test func aRunMountsWorkspaceScopedCachesByDefault() throws {
     let workspace = try makeTempDir(files: [:])
 
-    let volumes = try RunRuntimePolicy.cacheVolumes(
+    let caches = try RunRuntimePolicy.cacheMounts(
         cacheOverride: nil,
         workspaceConfig: nil,
         toolchain: .rust,
         imageOverride: nil,
-        workspace: workspace
+        workspace: workspace,
+        root: runCacheRoot
     )
 
-    #expect(volumes == CacheVolumes.forToolchain(.rust, scope: .workspace, workspace: workspace))
-    #expect(!volumes.isEmpty)
+    #expect(caches == CacheMounts.forToolchain(.rust, scope: .workspace, workspace: workspace, root: runCacheRoot))
+    #expect(!caches.isEmpty)
+    // Not the shared directory, whatever the workspace is called.
+    #expect(!caches.contains { $0.hostPath.hasPrefix(runCacheRoot.path + "/shared/") })
 }
 
-@Test func aRunInAnotherWorkspaceMountsDifferentVolumes() throws {
+@Test func aRunInAnotherWorkspaceMountsDifferentCaches() throws {
     let left = try makeTempDir(files: [:])
     let right = try makeTempDir(files: [:])
 
-    let leftVolumes = try RunRuntimePolicy.cacheVolumes(
-        cacheOverride: nil, workspaceConfig: nil, toolchain: .rust, imageOverride: nil, workspace: left
+    let leftCaches = try RunRuntimePolicy.cacheMounts(
+        cacheOverride: nil, workspaceConfig: nil, toolchain: .rust, imageOverride: nil, workspace: left,
+        root: runCacheRoot
     )
-    let rightVolumes = try RunRuntimePolicy.cacheVolumes(
-        cacheOverride: nil, workspaceConfig: nil, toolchain: .rust, imageOverride: nil, workspace: right
+    let rightCaches = try RunRuntimePolicy.cacheMounts(
+        cacheOverride: nil, workspaceConfig: nil, toolchain: .rust, imageOverride: nil, workspace: right,
+        root: runCacheRoot
     )
 
-    #expect(!leftVolumes.isEmpty)
-    #expect(Set(leftVolumes.map(\.name)).isDisjoint(with: Set(rightVolumes.map(\.name))))
+    #expect(!leftCaches.isEmpty)
+    #expect(Set(leftCaches.map(\.hostPath)).isDisjoint(with: Set(rightCaches.map(\.hostPath))))
 }
 
 @Test func aRunMountsSharedCachesOnlyWhenTheFlagAsks() throws {
     let workspace = try makeTempDir(files: [:])
     let sharingRepo = WorkspaceConfig(toolchainName: nil, agentName: nil, accessName: nil, cacheName: "shared")
 
-    let withFlag = try RunRuntimePolicy.cacheVolumes(
-        cacheOverride: "shared", workspaceConfig: nil, toolchain: .rust, imageOverride: nil, workspace: workspace
+    let withFlag = try RunRuntimePolicy.cacheMounts(
+        cacheOverride: "shared", workspaceConfig: nil, toolchain: .rust, imageOverride: nil, workspace: workspace,
+        root: runCacheRoot
     )
-    let repoOnly = try RunRuntimePolicy.cacheVolumes(
-        cacheOverride: nil, workspaceConfig: sharingRepo, toolchain: .rust, imageOverride: nil, workspace: workspace
+    let repoOnly = try RunRuntimePolicy.cacheMounts(
+        cacheOverride: nil, workspaceConfig: sharingRepo, toolchain: .rust, imageOverride: nil, workspace: workspace,
+        root: runCacheRoot
     )
 
-    #expect(withFlag == CacheVolumes.forToolchain(.rust, scope: .shared, workspace: workspace))
-    #expect(repoOnly == CacheVolumes.forToolchain(.rust, scope: .workspace, workspace: workspace))
-    #expect(Set(withFlag.map(\.name)).isDisjoint(with: Set(repoOnly.map(\.name))))
+    #expect(withFlag == CacheMounts.forToolchain(.rust, scope: .shared, workspace: workspace, root: runCacheRoot))
+    #expect(repoOnly == CacheMounts.forToolchain(.rust, scope: .workspace, workspace: workspace, root: runCacheRoot))
+    #expect(Set(withFlag.map(\.hostPath)).isDisjoint(with: Set(repoOnly.map(\.hostPath))))
+    // The repo asked for the shared directory and must not have reached it.
+    #expect(withFlag.allSatisfy { $0.hostPath.hasPrefix(runCacheRoot.path + "/shared/") })
+    #expect(!repoOnly.contains { $0.hostPath.hasPrefix(runCacheRoot.path + "/shared/") })
 }
 
 @Test func aRunWithAnImageOverrideMountsNoCaches() throws {
@@ -507,12 +523,13 @@ import Testing
 
     for scope in CacheScope.allCases {
         #expect(
-            try RunRuntimePolicy.cacheVolumes(
+            try RunRuntimePolicy.cacheMounts(
                 cacheOverride: scope.rawValue,
                 workspaceConfig: nil,
                 toolchain: .rust,
                 imageOverride: "ghcr.io/foo/bar",
-                workspace: workspace
+                workspace: workspace,
+                root: runCacheRoot
             ).isEmpty
         )
     }
@@ -522,12 +539,13 @@ import Testing
     let workspace = try makeTempDir(files: [:])
 
     #expect(throws: ValidationError.self) {
-        try RunRuntimePolicy.cacheVolumes(
+        try RunRuntimePolicy.cacheMounts(
             cacheOverride: "everyone",
             workspaceConfig: nil,
             toolchain: .rust,
             imageOverride: nil,
-            workspace: workspace
+            workspace: workspace,
+            root: runCacheRoot
         )
     }
 }

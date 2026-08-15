@@ -118,14 +118,14 @@ Do not broaden default secret exposure casually. The current direction is explic
 
 ## Build Cache Scope
 
-Cache volumes are mounted read-write and hold dependency sources fetched with the workspace's own credentials (`cargo`'s git cache can hold private repositories), so their names carry workspace identity by default.
+Build caches are host directories under `<state>/caches/<scope-key>/<cache>`, bind-mounted read-write. They hold dependency sources fetched with the workspace's own credentials (`cargo`'s git cache can hold private repositories), so the scope key carries workspace identity by default.
 
-- `workspace` (default): names are suffixed with `WorkspaceIdentity.key(for:)` — the same slug-plus-path-hash that names a workspace-image — so two workspaces never share a volume
-- `shared`: the historical unscoped names, so opting in reuses volumes already on disk
+- `workspace` (default): the key is `WorkspaceIdentity.key(for:)` — the same slug-plus-path-hash that names a workspace-image — so two workspaces never share a directory
+- `shared`: one `shared` directory for every workspace that opts in
 - only `--cache shared` may select `shared`; `.spawn.toml [workspace] cache = "shared"` is ignored with a warning, exactly as a repo-supplied `access` elevation is. Repo config may narrow (`cache = "workspace"`), never widen
 - a shared cache is readable and writable by every workspace using it; a run that uses one says so
 
-`spawn doctor` must name the volumes the workspace would actually mount, resolving the scope the way a run does. Anything that names cache volumes goes through `CacheVolumes`, never by string-building a name.
+`spawn doctor` must name the directories the workspace would actually mount, resolving the scope the way a run does. Anything that names a cache path goes through `CacheMounts`, never by string-building a path.
 
 ## Important Design Constraints
 
@@ -137,8 +137,8 @@ Cache volumes are mounted read-write and hold dependency sources fetched with th
 - Embedded `ContainerfileTemplates.swift` keeps `spawn build` self-contained after installation
 - Language toolchains live under `/opt` (`/opt/rust`, `/opt/go`, `/opt/js`), never in `/home/coder`
 - Toolchain images must keep `/home/coder` identical to `spawn-base`'s; `scripts/smoke.sh` compares each image's full home listing — every entry with its type and symlink target, plus a checksum of every file — and fails if a toolchain leaks into the home or changes a file already there
-- Build caches are named `container` volumes mounted at run time, never baked into an image (see `Sources/CacheVolumes.swift`)
-- Cache volume names are workspace-scoped unless the user opts into `--cache shared`; workspace identity comes from `WorkspaceIdentity`, which also names workspace-images — do not duplicate that derivation
+- Build caches are host directories bind-mounted at run time, never baked into an image (see `Sources/CacheMounts.swift`). They are not named `container` volumes: a volume is a raw ext4 image on a virtio block device, which `container` treats as exclusively owned, and concurrent runs sharing one fail with `VZErrorDomain Code=2`. A bind mount is served by VirtioFS, which maps ownership to the guest user — so creating a cache is one `mkdir`, with no chown, no rollback and no locking, and concurrent runs are safe
+- Cache directories are workspace-scoped unless the user opts into `--cache shared`; workspace identity comes from `WorkspaceIdentity`, which also names workspace-images — do not duplicate that derivation
 - `ContainerfileTemplates.swift` is the only source of Containerfile content; `spawn build` is the only supported way to build spawn-managed images
 
 ## Testing
@@ -169,8 +169,8 @@ Key files:
 - `Sources/MountResolver.swift`: workspace/auth/agent mounts
 - `Sources/ContainerRunner.swift`: container CLI boundary
 - `Sources/BuildCommand.swift`: spawn-managed image builds
-- `Sources/CacheVolumes.swift`: per-toolchain build-cache volume names, scope, guest paths, and preparation
-- `Sources/WorkspaceIdentity.swift`: the slug-plus-path-hash key shared by workspace-image names and workspace-scoped cache volumes
+- `Sources/CacheMounts.swift`: per-toolchain build-cache host paths, scope, guest paths, and directory creation
+- `Sources/WorkspaceIdentity.swift`: the slug-plus-path-hash key shared by workspace-image names and workspace-scoped caches
 - `Sources/DevcontainerParser.swift`: devcontainer parsing
 - `Sources/Types.swift`: `Toolchain`, `AccessProfile`, `CacheScope`, `RuntimeMode`, `AgentProfile`, `Mount`
 

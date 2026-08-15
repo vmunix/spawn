@@ -169,7 +169,7 @@ extension Spawn {
                 print("Warning: ignoring .spawn.toml access=\(configuredAccess.rawValue). Pass '--access \(configuredAccess.rawValue)' explicitly to opt into host auth exposure.")
             }
             // Parsed here only to reject a bad '--cache' before any container
-            // work and to pick the notices; the volumes a run mounts are
+            // work and to pick the notices; the caches a run mounts are
             // derived by RunRuntimePolicy below.
             let cacheScope = try CacheScope.parse(
                 RunRuntimePolicy.effectiveCacheScopeName(
@@ -243,6 +243,20 @@ extension Spawn {
                 agent: agent
             )
 
+            // Build caches, appended so the workspace stays the first mount.
+            // Which caches a run gets is resolved by RunRuntimePolicy, not here:
+            // the scope a run mounts with is unit-tested there, and this path
+            // must not hold a second, untested copy of that decision.
+            let cacheMounts = CacheMounts.prepare(
+                try RunRuntimePolicy.cacheMounts(
+                    cacheOverride: cache,
+                    workspaceConfig: workspaceConfig,
+                    toolchain: resolvedToolchain,
+                    imageOverride: image,
+                    workspace: path
+                )
+            )
+
             // Load environment
             var environment: [String: String]
             if let envFile {
@@ -312,28 +326,12 @@ extension Spawn {
             // Run
             let status = try ContainerRunner.run(
                 image: resolvedImage,
-                mounts: resolvedMounts,
+                mounts: resolvedMounts + cacheMounts,
                 env: environment,
                 workdir: workdir,
                 entrypoint: entrypoint,
                 cpus: cpus,
-                memory: memory,
-                cacheVolumes: ContainerRunner.prepareCacheVolumes(
-                    // Resolved by RunRuntimePolicy, not here: the scope a run
-                    // mounts with is unit-tested there, and this path must not
-                    // hold a second, untested copy of that decision.
-                    try RunRuntimePolicy.cacheVolumes(
-                        cacheOverride: cache,
-                        workspaceConfig: workspaceConfig,
-                        toolchain: resolvedToolchain,
-                        imageOverride: image,
-                        workspace: path
-                    ),
-                    // The spawn-managed image for the toolchain, never
-                    // `resolvedImage`: preparation is the one place spawn runs a
-                    // container as root, so it must not run a `--image` override.
-                    image: resolvedToolchain.imageName
-                )
+                memory: memory
             )
 
             if status != 0 {
