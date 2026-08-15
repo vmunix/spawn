@@ -77,6 +77,58 @@ cargo_registry_cache() {
   printf '%s\n' "$1" | grep -Eo '/[^" ,]*/caches/[^" ,]+/cargo-registry' | head -1
 }
 
+# Every cache mount point's *parent* must already exist, coder-owned, in the
+# toolchain image. The runtime creates a missing mount parent root-owned
+# whatever backs the mount, and the tool can then no longer write that parent's
+# other children -- a root-owned /opt/go/pkg is what stopped `go` writing
+# sumdb beside the mounted mod, which the go template's `mkdir -p` exists to
+# prevent. rust and js satisfy the rule incidentally, so nothing but this check
+# tells a toolchain author their new cache path needs the same treatment.
+#
+# The guest paths come from the run's own `--verbose` argv, not a list kept
+# here: adding a cache to CacheMounts.forToolchain without fixing that
+# toolchain's template therefore fails this check with no smoke edit at all.
+check_cache_mount_parents() {
+  local label="$1" expected_count="$2"
+  shift 2
+
+  run_and_capture "${label}: run argv for cache mount points" "$@" --verbose -- true
+  # `--` before the pattern: it starts with `-`, and grep would otherwise read
+  # it as an option, exit 2, and print nothing -- which reads as "no caches" and
+  # would make every assertion below vacuous.
+  local guest_paths
+  guest_paths="$(printf '%s\n' "${REPLY}" | grep -Eo -- '--volume [^ ]*/caches/[^ ]+' | sed 's/.*://' | sort -u)"
+
+  local count
+  count="$(printf '%s\n' "${guest_paths}" | grep -c '^/' || true)"
+  [[ "${count}" == "${expected_count}" ]] \
+    || fail "${label}: expected ${expected_count} cache mounts in the run argv, saw ${count}: $(printf '%s ' ${guest_paths})"
+
+  # Written, not just stat'd: `touch` in the parent is exactly the sibling write
+  # a root-owned parent blocks, and it runs as the guest user a run really uses.
+  local probe="set -e" path
+  while read -r path; do
+    [[ -n "${path}" ]] || continue
+    probe+="
+parent=\$(dirname ${path})
+test -d \"\${parent}\" || { echo \"MISSING-PARENT \${parent}\"; exit 1; }
+touch \"\${parent}/.spawn-parent-probe\" || { echo \"UNWRITABLE-PARENT \${parent}\"; exit 1; }
+rm -f \"\${parent}/.spawn-parent-probe\"
+touch \"${path}/.spawn-cache-probe\" || { echo \"UNWRITABLE-CACHE ${path}\"; exit 1; }
+rm -f \"${path}/.spawn-cache-probe\"
+echo \"CHECKED ${path}\""
+  done <<<"${guest_paths}"
+  probe+="
+echo \"PASS: ${label} cache mount parents\""
+
+  run_and_capture "${label}: cache mount points are coder-writable" "$@" -- /bin/bash -lc "${probe}"
+  while read -r path; do
+    [[ -n "${path}" ]] || continue
+    expect_contains "${REPLY}" "CHECKED ${path}" "${label}: ${path} parent must be coder-writable in the image"
+  done <<<"${guest_paths}"
+  expect_contains "${REPLY}" "PASS: ${label} cache mount parents" "${label}: mount-parent probe must run to completion"
+}
+
 run_and_capture() {
   local label="$1"
   shift
@@ -192,9 +244,16 @@ expect_not_regex "${REPLY}" \
 [[ -d "${SHARED_CACHE_DIR}/cargo-registry" ]] \
   || fail "spawn mounted ${SHARED_CACHE_DIR}/cargo-registry without creating it on the host"
 
+# Every toolchain that declares caches, driven from its own run argv. The counts
+# are the one hand-written thing here, and they fail safe: adding or removing a
+# cache trips this before any assertion below it can pass vacuously.
+check_cache_mount_parents "rust" 2 "${SPAWN_BIN}" -C "${ROOT}/fixtures/rust-sample"
+check_cache_mount_parents "go" 1 "${SPAWN_BIN}" -C "${ROOT}/fixtures/go-sample"
+check_cache_mount_parents "js" 2 "${SPAWN_BIN}" -C "${ROOT}/fixtures/node-sample" --runtime spawn
+
 run_and_capture "Go fixture: explicit workspace + access profile" \
   "${SPAWN_BIN}" -C "${ROOT}/fixtures/go-sample" --access minimal -- /bin/bash -lc \
-  'test ! -e /home/coder/.ssh && test ! -e /home/coder/.config/gh/hosts.yml && go version && go build ./... && go test -v ./... && echo "PASS: go-sample" && test -w /opt/go/pkg/mod && touch /opt/go/pkg/sumdb-probe'
+  'test ! -e /home/coder/.ssh && test ! -e /home/coder/.config/gh/hosts.yml && go version && go build ./... && go test -v ./... && echo "PASS: go-sample"'
 expect_contains "${REPLY}" "access: minimal" "go access profile"
 expect_contains "${REPLY}" "PASS: go-sample" "go fixture output"
 
