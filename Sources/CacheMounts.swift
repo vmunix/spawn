@@ -59,6 +59,20 @@ enum CacheMounts: Sendable {
 
     /// Build caches for a toolchain. Guest paths must match the toolchain
     /// locations set in `ContainerfileTemplates`.
+    ///
+    /// Every mount point's *parent* must already exist, coder-owned, in the
+    /// image. This survives the move off named volumes unchanged: the runtime
+    /// still creates the missing parents of a mount point root-owned, whatever
+    /// backs the mount, and the tool then cannot write the parent's other
+    /// children. rust and js satisfy it incidentally — rustup creates
+    /// `/opt/rust/cargo`, and `/opt/js` is chowned — but go did not, and a
+    /// root-owned `/opt/go/pkg` blocked `go` from writing `sumdb` beside the
+    /// mounted `mod`; its template needed an explicit
+    /// `mkdir -p /opt/go/pkg/mod && chown -R coder:coder /opt/go`.
+    ///
+    /// A new toolchain's template must satisfy this before its cache is added
+    /// to the switch below. `ContainerfileTemplatesTests` enforces it for go,
+    /// the case that needed fixing; a new case needs its own assertion there.
     static func forToolchain(_ toolchain: Toolchain, scope: CacheScope, workspace: URL, root: URL) -> [Mount] {
         let directory = directory(scope: scope, workspace: workspace, root: root)
         switch toolchain {

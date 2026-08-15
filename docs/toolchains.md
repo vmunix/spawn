@@ -129,6 +129,8 @@ rm -rf ~/.local/state/spawn/caches                                   # clear eve
 
 Copy the exact path from `spawn doctor`, which prints what this workspace's runs actually mount.
 
+Removing a cache is also the recovery path when one is left unwritable -- a directory that ended up mode `0555`, or owned by another account on this machine. spawn only ensures the directory exists, so it mounts such a directory as-is and the build then fails with "permission denied" writing a cache path inside the container. `rm -rf` the directory `spawn doctor` names and rerun; the next run recreates it owned by you.
+
 ### Removing the old cache volumes
 
 Caches used to be named `container` volumes. Nothing reads those now, so delete them once:

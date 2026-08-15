@@ -1,5 +1,7 @@
 # Toolchains Out Of $HOME Implementation Plan
 
+> **Historical record. Partly superseded:** this plan's build-cache design — named `container` volumes, with the create/chown/rollback/lock machinery that follows from them — was replaced by host-directory bind mounts. A named volume is a raw ext4 image on a virtio block device that `container` treats as exclusively owned, so concurrent runs sharing one corrupt or fail; the write-performance advantage noted below is real and measured but is not decisive against that. The `/opt` relocation, which is the rest of this plan, stands. See `docs/toolchains.md` for the current mechanism.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Move every language toolchain out of `/home/coder` and into `/opt`, so a spawn container's home holds only user state — and persist the build caches in named volumes so they survive between runs.
