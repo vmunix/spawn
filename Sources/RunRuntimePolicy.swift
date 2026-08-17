@@ -3,6 +3,32 @@ import Foundation
 
 /// Centralizes runtime and access rules for workspace launches.
 enum RunRuntimePolicy: Sendable {
+    /// The cache decision for one launch, resolved before any container work.
+    ///
+    /// Keeping the image override in the decision makes "custom images get no
+    /// caches" part of the same value as the scope and warning. Callers cannot
+    /// report one policy and later construct mounts from a second set of raw
+    /// CLI/config inputs.
+    struct CacheSelection: Sendable, Equatable {
+        let scope: CacheScope
+        let ignoredConfiguredScope: CacheScope?
+        let imageOverride: String?
+
+        func mounts(
+            toolchain: Toolchain,
+            workspace: URL,
+            root: URL = CacheMounts.root()
+        ) -> [Mount] {
+            CacheMounts.forRun(
+                toolchain: toolchain,
+                imageOverride: imageOverride,
+                scope: scope,
+                workspace: workspace,
+                root: root
+            )
+        }
+    }
+
     static func requiresExplicitRuntimeSelection(for source: ToolchainDetector.Source) -> Bool {
         switch source {
         case .dockerfile, .devcontainerDockerfile:
@@ -59,73 +85,48 @@ enum RunRuntimePolicy: Sendable {
         return AccessProfile.minimal.rawValue
     }
 
-    /// Resolves the cache scope for a run: `--cache` beats `.spawn.toml`, which
-    /// may only narrow.
+    /// Resolves all cache policy for a run from its CLI and repository inputs.
     ///
     /// Repo-controlled config never widens exposure, the same rule `access`
     /// follows. `shared` reaches into caches other workspaces wrote and lets
     /// this one rewrite what they build against next — the cross-workspace
     /// channel scoping exists to close — so only an explicit `--cache shared`
     /// may select it. A repo asking for `workspace` is a narrowing and is
-    /// honoured silently; a repo asking for anything else is ignored, and
-    /// `ignoredConfiguredCacheScope` reports that so the user can be told.
-    static func effectiveCacheScopeName(
+    /// honoured silently; a repo asking for anything else is ignored and
+    /// reported in the returned selection.
+    static func resolveCacheSelection(
         cacheOverride: String?,
+        imageOverride: String?,
         workspaceConfig: WorkspaceConfig?
-    ) -> String {
+    ) throws -> CacheSelection {
         if let cacheOverride {
-            return cacheOverride
+            return CacheSelection(
+                scope: try CacheScope.parse(cacheOverride),
+                ignoredConfiguredScope: nil,
+                imageOverride: imageOverride
+            )
         }
 
-        if workspaceConfig?.cacheScope == .workspace {
-            return CacheScope.workspace.rawValue
-        }
-
-        return CacheScope.workspace.rawValue
+        let selection = defaultCacheSelection(workspaceConfig: workspaceConfig)
+        return CacheSelection(
+            scope: selection.scope,
+            ignoredConfiguredScope: selection.ignoredConfiguredScope,
+            imageOverride: imageOverride
+        )
     }
 
-    /// The wider cache scope a workspace asked for in `.spawn.toml` and did not
-    /// get, or `nil` when nothing was ignored.
+    /// The selection doctor reports for a run without CLI overrides.
     ///
     /// An unparseable value is not reported: it selected nothing, exactly as an
     /// unparseable `access` value does.
-    static func ignoredConfiguredCacheScope(
-        cacheOverride: String?,
+    static func defaultCacheSelection(
         workspaceConfig: WorkspaceConfig?
-    ) -> CacheScope? {
-        guard cacheOverride == nil,
-            let configured = workspaceConfig?.cacheScope,
-            configured != .workspace
-        else {
-            return nil
-        }
-        return configured
-    }
-
-    /// Every build cache a run should mount, derived from the raw run inputs.
-    ///
-    /// `run()` used to resolve the scope and pass it to the cache layer at the
-    /// call site, which left the most security-critical argument in the program
-    /// — the scope a run actually mounts with — reachable only by launching a
-    /// container. Deriving it in one pure function puts it under unit test; the
-    /// launch path then has no cache decision of its own to get wrong.
-    static func cacheMounts(
-        cacheOverride: String?,
-        workspaceConfig: WorkspaceConfig?,
-        toolchain: Toolchain,
-        imageOverride: String?,
-        workspace: URL,
-        root: URL = CacheMounts.root()
-    ) throws -> [Mount] {
-        let scope = try CacheScope.parse(
-            effectiveCacheScopeName(cacheOverride: cacheOverride, workspaceConfig: workspaceConfig)
-        )
-        return CacheMounts.forRun(
-            toolchain: toolchain,
-            imageOverride: imageOverride,
-            scope: scope,
-            workspace: workspace,
-            root: root
+    ) -> CacheSelection {
+        let configured = workspaceConfig?.cacheScope
+        return CacheSelection(
+            scope: .workspace,
+            ignoredConfiguredScope: configured.flatMap { $0 == .workspace ? nil : $0 },
+            imageOverride: nil
         )
     }
 }

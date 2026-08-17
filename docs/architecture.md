@@ -75,6 +75,9 @@ RunCommand.run()
   → ToolchainDetector.loadWorkspaceConfig()
                                   # Load `.spawn.toml` workspace defaults
   → AgentProfile.named()          # Validate resolved agent (CLI/config/default)
+  → RunRuntimePolicy.resolveCacheSelection()
+                                  # Resolve cache scope, ignored repo config,
+                                  # and the --image cache exclusion once
   → SettingsSeeder.seed()         # Seed safe-mode permissions (claude-code only)
   → ToolchainDetector.detect()    # Auto-detect or use override
   → RuntimeMode.parse()           # Decide whether auto/spawn/workspace-image applies
@@ -82,14 +85,12 @@ RunCommand.run()
                                   # Build or reuse a cached workspace image when requested
   → ImageResolver.resolve()       # Map toolchain to image name for spawn-managed runtimes
   → MountResolver.resolve()       # Build mount list
-  → EnvLoader.load/loadDefault()  # Load env vars
-  → RunRuntimePolicy.cacheMounts()
-                                  # Resolve the build caches this run mounts:
-                                  # workspace-scoped unless --cache shared, none
-                                  # at all for --image
+  → RunRuntimePolicy.CacheSelection.mounts()
+                                  # Derive mount paths from the resolved policy
   → CacheMounts.prepare()         # mkdir each host cache directory, appended to
                                   # the mount list (VirtioFS maps them to the
                                   # guest user, so no chown and no locking)
+  → EnvLoader.load/loadDefault()  # Load env vars
   → ContainerRunner.run()         # Launch container
 ```
 
@@ -105,9 +106,11 @@ When stdin is a real terminal, spawn uses `execv` to replace its process with `c
 
 ### VirtioFS workaround
 
-VirtioFS preserves host file ownership and permissions. Files owned by the macOS user (uid 501) with 600 permissions are unreadable by the container's `coder` user (uid 1001). When an access profile opts into host auth, spawn copies the selected files to the state directory where it controls permissions, then mounts the copies.
+VirtioFS maps bind-mounted files owned by the macOS user to the container's `coder` user. When an access profile opts into host auth, spawn still copies selected material into state directories so it can filter symlinks, expose only supported files, and mount stable directories instead of sensitive host paths.
 
 Single-file bind mounts also don't support atomic rename (EBUSY). `~/.claude.json` is handled via a symlink into a directory mount (`~/.claude-state/`) to work around this.
+
+A future persistent-home design must keep access-controlled credentials ephemeral rather than copying them into the persistent home. The security and image-compatibility constraints are recorded in [Persistent Home Safety Constraints](plans/persistent-home-safety-constraints.md).
 
 ### Credential persistence
 

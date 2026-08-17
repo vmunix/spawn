@@ -139,6 +139,12 @@ private func sharedCaches(_ toolchain: Toolchain, in workspace: URL = workspaceA
     #expect(privateCaches(.rust).map(\.hostPath) == privateCaches(.rust).map(\.hostPath))
 }
 
+@Test func workspaceIdentityHasAStableKnownValueAcrossProcesses() {
+    // A same-process equality check cannot catch Swift's randomized `hashValue`.
+    // This value is the public FNV-1a identity contract for the canonical path.
+    #expect(WorkspaceIdentity.key(for: workspaceA) == "project-1183064f02567d39")
+}
+
 @Test func workspaceScopedPathsIgnorePathSpellingDifferences() {
     // ~/code/app, ~/code/app/ and ~/code/./app are one workspace, so they must
     // reach one cache rather than quietly starting a second.
@@ -394,6 +400,29 @@ private func sharedCaches(_ toolchain: Toolchain, in workspace: URL = workspaceA
 
     #expect(usable == Array(caches.dropFirst()))
     #expect(!usable.contains(blocked))
+}
+
+@Test func aPreexistingUnwritableCacheDirectoryIsDroppedNotMounted() throws {
+    let root = try makeTempDir(files: [:]).appendingPathComponent("caches")
+    let caches = privateCaches(.go, root: root)
+    let cache = try #require(caches.first)
+    try FileManager.default.createDirectory(
+        atPath: cache.hostPath,
+        withIntermediateDirectories: true
+    )
+    try FileManager.default.setAttributes(
+        [.posixPermissions: 0o500],
+        ofItemAtPath: cache.hostPath
+    )
+    defer {
+        try? FileManager.default.setAttributes(
+            [.posixPermissions: 0o700],
+            ofItemAtPath: cache.hostPath
+        )
+    }
+
+    #expect(CacheMounts.directoryStatus(at: cache.hostPath) == .notWritable)
+    #expect(CacheMounts.prepare(caches).isEmpty)
 }
 
 @Test func preparingNoCachesTouchesNothing() throws {

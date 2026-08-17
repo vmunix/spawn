@@ -461,7 +461,7 @@ extension Spawn {
         /// their host paths here is what makes them inspectable (`ls`) and
         /// removable (`rm -rf <path>`).
         ///
-        /// `exists` is injected so the check stays pure and unit-testable. A
+        /// `status` is injected so the check stays pure and unit-testable. A
         /// directory that has not been created yet is normal before a toolchain's
         /// first run — spawn creates it on demand — so it is annotated rather than
         /// reported as a fault.
@@ -469,7 +469,7 @@ extension Spawn {
             toolchain: Toolchain,
             scope: CacheScope,
             mounts: [Mount],
-            exists: @Sendable (String) -> Bool = Self.directoryExists
+            status: @Sendable (String) -> CacheMounts.DirectoryStatus = { CacheMounts.directoryStatus(at: $0) }
         ) -> Check {
             guard !mounts.isEmpty else {
                 return Check(
@@ -479,22 +479,30 @@ extension Spawn {
                 )
             }
 
-            let described = mounts.map { mount in
-                exists(mount.hostPath) ? mount.hostPath : "\(mount.hostPath) (not created yet)"
+            let statuses = mounts.map { mount in
+                (mount, status(mount.hostPath))
+            }
+            let described = statuses.map { mount, status in
+                switch status {
+                case .missing:
+                    return "\(mount.hostPath) (not created yet)"
+                case .ready:
+                    return mount.hostPath
+                case .notDirectory:
+                    return "\(mount.hostPath) (not a directory)"
+                case .notWritable:
+                    return "\(mount.hostPath) (not writable)"
+                }
+            }
+            let hasUnusablePath = statuses.contains { _, status in
+                status == .notDirectory || status == .notWritable
             }
 
             return Check(
-                status: .ok,
+                status: hasUnusablePath ? .warning : .ok,
                 title: "Build caches",
                 detail: "\(toolchain.rawValue) [\(scope.rawValue) scope]: \(described.joined(separator: ", "))"
             )
-        }
-
-        /// Whether a host cache directory is already on disk.
-        static let directoryExists: @Sendable (String) -> Bool = { path in
-            var isDirectory: ObjCBool = false
-            let found = FileManager.default.fileExists(atPath: path, isDirectory: &isDirectory)
-            return found && isDirectory.boolValue
         }
 
         /// The build caches this workspace's runs would actually mount.
@@ -509,27 +517,17 @@ extension Spawn {
             toolchain: Toolchain,
             workspaceConfig: WorkspaceConfig?,
             root: URL = CacheMounts.root(),
-            exists: @Sendable (String) -> Bool = Self.directoryExists
+            status: @Sendable (String) -> CacheMounts.DirectoryStatus = { CacheMounts.directoryStatus(at: $0) }
         ) -> Check {
-            let scopeName = RunRuntimePolicy.effectiveCacheScopeName(
-                cacheOverride: nil,
-                workspaceConfig: workspaceConfig
-            )
-            // Without an override the policy always resolves to a valid scope;
-            // the fallback keeps doctor from inventing one if that changes.
-            let scope = (try? CacheScope.parse(scopeName)) ?? .workspace
+            let selection = RunRuntimePolicy.defaultCacheSelection(workspaceConfig: workspaceConfig)
             let check = cacheMountCheck(
                 toolchain: toolchain,
-                scope: scope,
-                mounts: CacheMounts.forToolchain(toolchain, scope: scope, workspace: workspace, root: root),
-                exists: exists
+                scope: selection.scope,
+                mounts: selection.mounts(toolchain: toolchain, workspace: workspace, root: root),
+                status: status
             )
 
-            let ignoredScope = RunRuntimePolicy.ignoredConfiguredCacheScope(
-                cacheOverride: nil,
-                workspaceConfig: workspaceConfig
-            )
-            guard let ignored = ignoredScope else {
+            guard let ignored = selection.ignoredConfiguredScope else {
                 return check
             }
 

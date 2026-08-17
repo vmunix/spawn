@@ -146,6 +146,18 @@ run_and_capture() {
 
 [[ -x "${SPAWN_BIN}" ]] || fail "release binary not found at ${SPAWN_BIN}; run 'make build' first"
 
+# Keep every cache and state mutation owned by this smoke invocation. Besides
+# leaving the user's state untouched, this makes cleanup race-free: no real run
+# can be writing the directory removed by the EXIT trap.
+SMOKE_TEMP_ROOT="$(mktemp -d)"
+export XDG_STATE_HOME="${SMOKE_TEMP_ROOT}/state"
+CACHE_PROBE_DIR="${SMOKE_TEMP_ROOT}/cache-probe"
+mkdir -p "${CACHE_PROBE_DIR}"
+cleanup_smoke() {
+  rm -rf -- "${SMOKE_TEMP_ROOT}"
+}
+trap cleanup_smoke EXIT
+
 run_and_capture "Build spawn-managed images" "${SPAWN_BIN}" build
 
 run_and_capture "List spawn-managed images" "${SPAWN_BIN}" image list
@@ -175,19 +187,6 @@ SHARED_CACHE_DIR="$(dirname "$(dirname "${RUST_FIXTURE_CACHE}")")/shared"
 # Same project contents at another path: the caches must not be the same
 # directories, or one workspace could read and rewrite another's dependency
 # sources.
-CACHE_PROBE_DIR="$(mktemp -d)"
-# The shared cache directory is removed on the way out only if this run created
-# it: a user who has really opted into '--cache shared' has content there, and
-# smoke must not wipe it. In the trap, so a failing assertion between here and
-# the end does not leak it either.
-SMOKE_CREATED_SHARED_CACHE=0
-cleanup_cache_probe() {
-  rm -rf "${CACHE_PROBE_DIR}"
-  if [[ "${SMOKE_CREATED_SHARED_CACHE}" == "1" && "${SHARED_CACHE_DIR}" == */caches/shared ]]; then
-    rm -rf "${SHARED_CACHE_DIR}"
-  fi
-}
-trap cleanup_cache_probe EXIT
 cp -R "${ROOT}/fixtures/rust-sample" "${CACHE_PROBE_DIR}/rust-sample"
 
 run_and_capture "Doctor JSON scopes caches to the workspace path" \
@@ -208,6 +207,17 @@ expect_regex "${REPLY}" 'rust \[workspace scope\]' "repo-configured sharing must
 expect_not_regex "${REPLY}" '/caches/shared/' "repo-configured sharing must not name the shared cache"
 expect_regex "${REPLY}" 'cache=shared ignored' "doctor must report the ignored cache scope"
 
+# Doctor and launch must agree. This uses the hostile repo config above and
+# inspects the actual container argv, so a warning disconnected from the
+# mounted directories cannot satisfy the check.
+run_and_capture "Run ignores a repo-configured shared cache" \
+  "${SPAWN_BIN}" -C "${CACHE_PROBE_DIR}/rust-sample" --verbose -- true
+expect_contains "${REPLY}" "ignoring .spawn.toml cache=shared" "run must warn about repo-configured sharing"
+expect_regex "${REPLY}" \
+  "--volume ${PROBE_CACHE}:/opt/rust/cargo/registry" "hostile repo must mount its private cache"
+expect_not_regex "${REPLY}" \
+  '--volume [^ ]*/caches/shared/' "hostile repo must not mount the shared cache"
+
 run_and_capture "Rust fixture: cwd default + passthrough command" \
   /bin/bash -lc "cd \"${ROOT}/fixtures/rust-sample\" && \"${SPAWN_BIN}\" -- cargo test"
 expect_contains "${REPLY}" "session: command (cargo, 1 arg)" "rust passthrough launch summary"
@@ -227,13 +237,14 @@ expect_not_regex "${REPLY}" \
 [[ -d "${RUST_FIXTURE_CACHE}" ]] \
   || fail "spawn mounted ${RUST_FIXTURE_CACHE} without creating it on the host"
 
-# The flag is the only way to reach the shared cache, and it must still work.
-# Record whether it is absent first: if so, this run creates it and is therefore
-# allowed to delete it afterwards.
-if [[ ! -d "${SHARED_CACHE_DIR}" ]]; then
-  SMOKE_CREATED_SHARED_CACHE=1
-fi
+# Custom images have unknown layouts, even if the chosen name happens to be a
+# locally built spawn image. The run argv must contain no build-cache mount.
+run_and_capture "Rust fixture: --image override mounts no build caches" \
+  "${SPAWN_BIN}" -C "${ROOT}/fixtures/rust-sample" --image spawn-rust:latest --verbose -- true
+expect_not_regex "${REPLY}" \
+  '--volume [^ ]*/caches/' "--image must disable build-cache mounts"
 
+# The flag is the only way to reach the shared cache, and it must still work.
 run_and_capture "Rust fixture: --cache shared mounts the shared caches" \
   /bin/bash -lc "cd \"${ROOT}/fixtures/rust-sample\" && \"${SPAWN_BIN}\" --verbose --cache shared -- true"
 expect_regex "${REPLY}" \
@@ -327,15 +338,16 @@ section "Toolchain images keep /home/coder identical to base"
 # `ln -s /opt/rust/cargo /home/coder/.cargo`, a directory-only leak, or a
 # one-added-one-removed swap.
 #
-# The listing carries type and symlink target (`%y %l`) as well as the path, so
-# a retargeted symlink is caught even though `.claude.json` is dangling and thus
+# The listing carries type, mode, numeric owner/group, and symlink target
+# (`%y %m %U %G %l`) as well as the path, so permission/ownership changes and a
+# retargeted symlink are caught even though `.claude.json` is dangling and thus
 # invisible to `-type f`; the md5sums catch a same-path content change, such as
 # a `.bashrc` that regained the bun/deno installer's `export` lines because the
 # `/etc/skel` restore moved above the installers. `find -printf` is GNU find,
 # which is what these Ubuntu images ship — this runs inside the container.
 home_listing() {
   "${CONTAINER_BIN}" run --rm "$1" /bin/sh -c '
-    find /home/coder -mindepth 1 -printf "%p %y %l\n" | LC_ALL=C sort
+    find /home/coder -mindepth 1 -printf "%p %y %m %U %G %l\n" | LC_ALL=C sort
     find /home/coder -type f -exec md5sum {} + | LC_ALL=C sort
   '
 }

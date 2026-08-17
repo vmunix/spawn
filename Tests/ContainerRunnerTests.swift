@@ -103,9 +103,9 @@ import Testing
 // MARK: - Build caches in the container argv
 
 @Test func buildArgsBindMountsBuildCachesAfterTheWorkspace() {
-    // A run appends its caches to the resolved mounts, so this is the shape the
-    // container actually gets: host directory to guest path, read-write, with
-    // the workspace still first (the workdir is derived from it).
+    // Exercise Run's final mount assembly before rendering the container argv.
+    // Testing CacheMounts alone would stay green if run() stopped handing those
+    // mounts to ContainerRunner.
     let caches = CacheMounts.forToolchain(
         .rust,
         scope: .workspace,
@@ -113,9 +113,13 @@ import Testing
         root: URL(fileURLWithPath: "/state/caches")
     )
     let workspaceMount = Mount(hostPath: "/code/project", readOnly: false)
+    let launchMounts = Spawn.Run.launchMounts(
+        resolved: [workspaceMount],
+        caches: caches
+    )
     let args = ContainerRunner.buildArgs(
         image: "spawn-rust:latest",
-        mounts: [workspaceMount] + caches,
+        mounts: launchMounts,
         env: [:],
         workdir: "/workspace/project",
         entrypoint: ["true"],
@@ -124,6 +128,7 @@ import Testing
     )
 
     #expect(caches.count == 2)
+    #expect(launchMounts == [workspaceMount] + caches)
     let volumeSpecs = zip(args, args.dropFirst()).filter { $0.0 == "--volume" }.map(\.1)
     #expect(
         volumeSpecs == ["/code/project:/workspace/project"] + caches.map { "\($0.hostPath):\($0.guestPath)" }

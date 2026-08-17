@@ -60,7 +60,7 @@ Language toolchains are installed under `/opt`, never in the container's home:
 | `js` | `/opt/js` | `BUN_INSTALL=/opt/js/bun`, `DENO_INSTALL=/opt/js/deno`, `DENO_DIR=/opt/js/deno-cache` |
 | `cpp` | system paths (apt) | -- |
 
-`/home/coder` therefore holds user state only: a toolchain image adds nothing to it, and its contents stay identical to `spawn-base:latest`. `make smoke` enforces that -- it lists every entry under `/home/coder` in each image with its type and symlink target, checksums every file, and fails if a toolchain image differs from base in either the entries it has or the content of any file.
+`/home/coder` therefore holds user state only: a toolchain image adds nothing to it, and its contents stay identical to `spawn-base:latest`. `make smoke` enforces that -- it lists every entry under `/home/coder` in each image with its type, mode, numeric owner/group, and symlink target, checksums every file, and fails if a toolchain image differs from base in its entries, metadata, or file content.
 
 All of these are already on `PATH` inside the container, so no setup is needed. If you hardcoded the old locations (`/home/coder/.cargo`, `/home/coder/.rustup`, `/home/coder/go`, `/home/coder/.bun`, `/home/coder/.deno`) in a script or in `.spawn.toml`, point them at the `/opt` paths above.
 

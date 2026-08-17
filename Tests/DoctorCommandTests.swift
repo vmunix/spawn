@@ -316,7 +316,7 @@ private func namesPath(_ detail: String, _ path: String) -> Bool {
         toolchain: .rust,
         scope: .shared,
         mounts: caches,
-        exists: { _ in true }
+        status: { _ in .ready }
     )
 
     #expect(check.status == .ok)
@@ -330,7 +330,7 @@ private func namesPath(_ detail: String, _ path: String) -> Bool {
         toolchain: .rust,
         scope: .workspace,
         mounts: caches,
-        exists: { _ in false }
+        status: { _ in .missing }
     )
 
     #expect(check.status == .ok)
@@ -348,7 +348,7 @@ private func namesPath(_ detail: String, _ path: String) -> Bool {
         toolchain: .rust,
         scope: .workspace,
         mounts: caches,
-        exists: { $0 == present.hostPath }
+        status: { $0 == present.hostPath ? .ready : .missing }
     )
 
     #expect(check.detail == "rust [workspace scope]: \(present.hostPath), \(missing.hostPath) (not created yet)")
@@ -364,7 +364,7 @@ private func namesPath(_ detail: String, _ path: String) -> Bool {
                 toolchain: toolchain,
                 scope: scope,
                 mounts: caches,
-                exists: { _ in true }
+                status: { _ in .ready }
             )
             for cache in caches {
                 #expect(namesPath(check.detail, cache.hostPath))
@@ -381,7 +381,7 @@ private func namesPath(_ detail: String, _ path: String) -> Bool {
         toolchain: .js,
         scope: .workspace,
         mounts: caches,
-        exists: Spawn.Doctor.directoryExists
+        status: { CacheMounts.directoryStatus(at: $0) }
     )
 
     #expect(!caches.isEmpty)
@@ -391,13 +391,27 @@ private func namesPath(_ detail: String, _ path: String) -> Bool {
     }
 }
 
-@Test func doctorSeesACacheDirectoryThatExists() throws {
-    // The other half: `directoryExists` must actually distinguish. A file is not
-    // a cache directory either.
+@Test func doctorUsesTheSameCacheDirectoryReadinessCheckAsLaunches() throws {
     let base = try makeTempDir(files: ["not-a-directory": "x"])
-    #expect(Spawn.Doctor.directoryExists(base.path))
-    #expect(!Spawn.Doctor.directoryExists(base.appendingPathComponent("not-a-directory").path))
-    #expect(!Spawn.Doctor.directoryExists(base.appendingPathComponent("absent").path))
+    #expect(CacheMounts.directoryStatus(at: base.path) == .ready)
+    #expect(CacheMounts.directoryStatus(at: base.appendingPathComponent("not-a-directory").path) == .notDirectory)
+    #expect(CacheMounts.directoryStatus(at: base.appendingPathComponent("absent").path) == .missing)
+}
+
+@Test func doctorWarnsAboutAnUnwritableCacheDirectory() {
+    let caches = CacheMounts.forToolchain(.go, scope: .workspace, workspace: cacheWorkspace, root: doctorCacheRoot)
+    let check = Spawn.Doctor.cacheMountCheck(
+        toolchain: .go,
+        scope: .workspace,
+        mounts: caches,
+        status: { _ in .notWritable }
+    )
+
+    #expect(!caches.isEmpty)
+    #expect(check.status == .warning)
+    for cache in caches {
+        #expect(check.detail.contains("\(cache.hostPath) (not writable)"))
+    }
 }
 
 // MARK: - Doctor reports the caches a run would really mount
@@ -416,7 +430,7 @@ private func namesPath(_ detail: String, _ path: String) -> Bool {
         toolchain: .rust,
         workspaceConfig: nil,
         root: doctorCacheRoot,
-        exists: { _ in true }
+        status: { _ in .ready }
     )
 
     #expect(!expected.isEmpty)
@@ -441,7 +455,7 @@ private func namesPath(_ detail: String, _ path: String) -> Bool {
         toolchain: .rust,
         workspaceConfig: config,
         root: doctorCacheRoot,
-        exists: { _ in true }
+        status: { _ in .ready }
     )
 
     let mounted = CacheMounts.forRun(
@@ -467,14 +481,14 @@ private func namesPath(_ detail: String, _ path: String) -> Bool {
         toolchain: .rust,
         workspaceConfig: config,
         root: doctorCacheRoot,
-        exists: { _ in true }
+        status: { _ in .ready }
     )
     let unset = Spawn.Doctor.cacheCheck(
         workspace: workspace,
         toolchain: .rust,
         workspaceConfig: nil,
         root: doctorCacheRoot,
-        exists: { _ in true }
+        status: { _ in .ready }
     )
 
     #expect(check.detail == unset.detail)
@@ -492,7 +506,7 @@ private func namesPath(_ detail: String, _ path: String) -> Bool {
         toolchain: .rust,
         workspaceConfig: config,
         root: doctorCacheRoot,
-        exists: { _ in true }
+        status: { _ in .ready }
     )
 
     #expect(check.status == .ok)
@@ -510,7 +524,7 @@ private func namesPath(_ detail: String, _ path: String) -> Bool {
         toolchain: .base,
         scope: .workspace,
         mounts: [],
-        exists: { _ in false }
+        status: { _ in .missing }
     )
 
     #expect(check.status == .ok)

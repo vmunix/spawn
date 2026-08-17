@@ -323,12 +323,22 @@ import Testing
 //
 // Sharing a build cache is a cross-workspace read-write channel, so the default
 // is the private scope and only an explicit flag may widen it — the rule
-// `access` already follows. Every assertion below is anchored on the resolved
-// scope, not on message text.
+// `access` already follows. These tests parse the real command and resolve from
+// its stored properties, so disconnecting a flag at the launch boundary fails.
+
+private func parsedRun(_ arguments: [String]) throws -> Spawn.Run {
+    let command = try Spawn.Run.parseAsRoot(arguments)
+    return try #require(command as? Spawn.Run)
+}
+
+/// Cache root for the resolution tests. Passed explicitly so they never derive
+/// a path from the real state directory.
+private let runCacheRoot = URL(fileURLWithPath: "/state/spawn/caches")
 
 @Test func cacheScopeDefaultsToTheWorkspacePrivateScope() throws {
-    let name = RunRuntimePolicy.effectiveCacheScopeName(cacheOverride: nil, workspaceConfig: nil)
-    #expect(try CacheScope.parse(name) == .workspace)
+    let selection = try parsedRun([]).resolvedCacheSelection(workspaceConfig: nil)
+    #expect(selection.scope == .workspace)
+    #expect(selection.ignoredConfiguredScope == nil)
 
     let configWithoutCache = WorkspaceConfig(
         toolchainName: nil,
@@ -336,70 +346,55 @@ import Testing
         accessName: "git",
         cacheName: nil
     )
-    #expect(
-        try CacheScope.parse(
-            RunRuntimePolicy.effectiveCacheScopeName(cacheOverride: nil, workspaceConfig: configWithoutCache)
-        ) == .workspace
-    )
+    #expect(try parsedRun([]).resolvedCacheSelection(workspaceConfig: configWithoutCache).scope == .workspace)
 }
 
-@Test func repoConfiguredSharingIsIgnoredWithoutTheFlag() throws {
+@Test func parsedRunIgnoresRepoConfiguredSharingAndMountsPrivateCaches() throws {
     // The security rule: a repo cannot widen its own cache reach. A cloned
     // workspace that sets cache = "shared" would otherwise reach the caches a
     // user had opted into sharing elsewhere.
+    let workspace = try makeTempDir(files: [:])
     let config = WorkspaceConfig(toolchainName: nil, agentName: nil, accessName: nil, cacheName: "shared")
+    let selection = try parsedRun([]).resolvedCacheSelection(workspaceConfig: config)
+    let caches = selection.mounts(toolchain: .rust, workspace: workspace, root: runCacheRoot)
 
-    #expect(
-        try CacheScope.parse(
-            RunRuntimePolicy.effectiveCacheScopeName(cacheOverride: nil, workspaceConfig: config)
-        ) == .workspace
-    )
-    #expect(
-        RunRuntimePolicy.ignoredConfiguredCacheScope(cacheOverride: nil, workspaceConfig: config) == .shared
-    )
+    #expect(selection.scope == .workspace)
+    #expect(selection.ignoredConfiguredScope == .shared)
+    #expect(caches == CacheMounts.forToolchain(.rust, scope: .workspace, workspace: workspace, root: runCacheRoot))
+    #expect(!caches.isEmpty)
+    #expect(!caches.contains { $0.hostPath.hasPrefix(runCacheRoot.path + "/shared/") })
 }
 
-@Test func onlyTheFlagCanSelectTheSharedScope() throws {
+@Test func parsedCacheFlagIsTheOnlyWayToSelectSharedCaches() throws {
     // The other half of the rule: the flag must actually work, or opting in
     // would be impossible and the option decorative.
-    #expect(
-        try CacheScope.parse(
-            RunRuntimePolicy.effectiveCacheScopeName(cacheOverride: "shared", workspaceConfig: nil)
-        ) == .shared
-    )
-
+    let workspace = try makeTempDir(files: [:])
     let privateConfig = WorkspaceConfig(toolchainName: nil, agentName: nil, accessName: nil, cacheName: "workspace")
-    #expect(
-        try CacheScope.parse(
-            RunRuntimePolicy.effectiveCacheScopeName(cacheOverride: "shared", workspaceConfig: privateConfig)
-        ) == .shared
-    )
-    #expect(
-        RunRuntimePolicy.ignoredConfiguredCacheScope(cacheOverride: "shared", workspaceConfig: privateConfig) == nil
-    )
+    let selection = try parsedRun(["--cache", "shared"]).resolvedCacheSelection(workspaceConfig: privateConfig)
+    let caches = selection.mounts(toolchain: .rust, workspace: workspace, root: runCacheRoot)
+
+    #expect(selection.scope == .shared)
+    #expect(selection.ignoredConfiguredScope == nil)
+    #expect(caches == CacheMounts.forToolchain(.rust, scope: .shared, workspace: workspace, root: runCacheRoot))
+    #expect(caches.allSatisfy { $0.hostPath.hasPrefix(runCacheRoot.path + "/shared/") })
 }
 
 @Test func repoConfiguredNarrowingIsHonouredSilently() throws {
     // cache = "workspace" asks for less, so it is kept and nothing is reported
     // as ignored — the same asymmetry as access = "minimal".
     let config = WorkspaceConfig(toolchainName: nil, agentName: nil, accessName: nil, cacheName: "workspace")
+    let selection = try parsedRun([]).resolvedCacheSelection(workspaceConfig: config)
 
-    #expect(
-        try CacheScope.parse(
-            RunRuntimePolicy.effectiveCacheScopeName(cacheOverride: nil, workspaceConfig: config)
-        ) == .workspace
-    )
-    #expect(RunRuntimePolicy.ignoredConfiguredCacheScope(cacheOverride: nil, workspaceConfig: config) == nil)
+    #expect(selection.scope == .workspace)
+    #expect(selection.ignoredConfiguredScope == nil)
 }
 
 @Test func theFlagCanNarrowARepoThatAskedToShare() throws {
     let sharedConfig = WorkspaceConfig(toolchainName: nil, agentName: nil, accessName: nil, cacheName: "shared")
+    let selection = try parsedRun(["--cache", "workspace"]).resolvedCacheSelection(workspaceConfig: sharedConfig)
 
-    #expect(
-        try CacheScope.parse(
-            RunRuntimePolicy.effectiveCacheScopeName(cacheOverride: "workspace", workspaceConfig: sharedConfig)
-        ) == .workspace
-    )
+    #expect(selection.scope == .workspace)
+    #expect(selection.ignoredConfiguredScope == nil)
 }
 
 @Test func anUnusableCacheFlagIsRejectedRatherThanDefaulted() throws {
@@ -407,72 +402,25 @@ import Testing
     // for. A typo'd .spawn.toml value selects nothing, as an unknown access
     // value does, and leaves the private default in place.
     #expect(throws: ValidationError.self) {
-        try CacheScope.parse(
-            RunRuntimePolicy.effectiveCacheScopeName(cacheOverride: "everyone", workspaceConfig: nil)
-        )
+        try parsedRun(["--cache", "everyone"]).resolvedCacheSelection(workspaceConfig: nil)
     }
 
     let config = WorkspaceConfig(toolchainName: nil, agentName: nil, accessName: nil, cacheName: "everyone")
-    #expect(
-        try CacheScope.parse(
-            RunRuntimePolicy.effectiveCacheScopeName(cacheOverride: nil, workspaceConfig: config)
-        ) == .workspace
-    )
-    #expect(RunRuntimePolicy.ignoredConfiguredCacheScope(cacheOverride: nil, workspaceConfig: config) == nil)
-}
-
-/// Cache root for the resolution tests. Passed explicitly so they never derive
-/// a path from the real state directory.
-private let runCacheRoot = URL(fileURLWithPath: "/state/spawn/caches")
-
-@Test func theResolvedCacheScopeDecidesTheCachesARunMounts() throws {
-    // End of the wire: resolution must reach the host paths, not just the enum.
-    // A repo that asks to share gets the private caches; the flag gets the
-    // shared ones, and the two sets never overlap.
-    let workspace = try makeTempDir(files: [:])
-    let config = WorkspaceConfig(toolchainName: nil, agentName: nil, accessName: nil, cacheName: "shared")
-
-    let fromConfig = try CacheScope.parse(
-        RunRuntimePolicy.effectiveCacheScopeName(cacheOverride: nil, workspaceConfig: config)
-    )
-    let fromFlag = try CacheScope.parse(
-        RunRuntimePolicy.effectiveCacheScopeName(cacheOverride: "shared", workspaceConfig: config)
-    )
-
-    let configCaches = CacheMounts.forRun(
-        toolchain: .rust, imageOverride: nil, scope: fromConfig, workspace: workspace, root: runCacheRoot
-    )
-    let flagCaches = CacheMounts.forRun(
-        toolchain: .rust, imageOverride: nil, scope: fromFlag, workspace: workspace, root: runCacheRoot
-    )
-
-    #expect(!configCaches.isEmpty)
-    #expect(Set(configCaches.map(\.hostPath)).isDisjoint(with: Set(flagCaches.map(\.hostPath))))
-    #expect(
-        configCaches == CacheMounts.forToolchain(.rust, scope: .workspace, workspace: workspace, root: runCacheRoot)
-    )
-    #expect(flagCaches == CacheMounts.forToolchain(.rust, scope: .shared, workspace: workspace, root: runCacheRoot))
+    let selection = try parsedRun([]).resolvedCacheSelection(workspaceConfig: config)
+    #expect(selection.scope == .workspace)
+    #expect(selection.ignoredConfiguredScope == nil)
 }
 
 // MARK: - The caches a run actually mounts
 //
-// `run()` passes its raw inputs to `RunRuntimePolicy.cacheMounts` and mounts
-// exactly what comes back, so these assertions cover the launch path's cache
-// decision end to end. Before the helper existed, that decision lived inline in
-// `run()` and could only be exercised by starting a container: flipping it to
-// the shared scope — the original P1 — broke no test.
+// `run()` resolves this value from its own parsed properties and later asks the
+// same value for mounts. That is the seam below: it includes both the policy and
+// the real command wiring without launching a container.
 
 @Test func aRunMountsWorkspaceScopedCachesByDefault() throws {
     let workspace = try makeTempDir(files: [:])
-
-    let caches = try RunRuntimePolicy.cacheMounts(
-        cacheOverride: nil,
-        workspaceConfig: nil,
-        toolchain: .rust,
-        imageOverride: nil,
-        workspace: workspace,
-        root: runCacheRoot
-    )
+    let selection = try parsedRun([]).resolvedCacheSelection(workspaceConfig: nil)
+    let caches = selection.mounts(toolchain: .rust, workspace: workspace, root: runCacheRoot)
 
     #expect(caches == CacheMounts.forToolchain(.rust, scope: .workspace, workspace: workspace, root: runCacheRoot))
     #expect(!caches.isEmpty)
@@ -484,69 +432,28 @@ private let runCacheRoot = URL(fileURLWithPath: "/state/spawn/caches")
     let left = try makeTempDir(files: [:])
     let right = try makeTempDir(files: [:])
 
-    let leftCaches = try RunRuntimePolicy.cacheMounts(
-        cacheOverride: nil, workspaceConfig: nil, toolchain: .rust, imageOverride: nil, workspace: left,
-        root: runCacheRoot
-    )
-    let rightCaches = try RunRuntimePolicy.cacheMounts(
-        cacheOverride: nil, workspaceConfig: nil, toolchain: .rust, imageOverride: nil, workspace: right,
-        root: runCacheRoot
-    )
+    let selection = try parsedRun([]).resolvedCacheSelection(workspaceConfig: nil)
+    let leftCaches = selection.mounts(toolchain: .rust, workspace: left, root: runCacheRoot)
+    let rightCaches = selection.mounts(toolchain: .rust, workspace: right, root: runCacheRoot)
 
     #expect(!leftCaches.isEmpty)
     #expect(Set(leftCaches.map(\.hostPath)).isDisjoint(with: Set(rightCaches.map(\.hostPath))))
-}
-
-@Test func aRunMountsSharedCachesOnlyWhenTheFlagAsks() throws {
-    let workspace = try makeTempDir(files: [:])
-    let sharingRepo = WorkspaceConfig(toolchainName: nil, agentName: nil, accessName: nil, cacheName: "shared")
-
-    let withFlag = try RunRuntimePolicy.cacheMounts(
-        cacheOverride: "shared", workspaceConfig: nil, toolchain: .rust, imageOverride: nil, workspace: workspace,
-        root: runCacheRoot
-    )
-    let repoOnly = try RunRuntimePolicy.cacheMounts(
-        cacheOverride: nil, workspaceConfig: sharingRepo, toolchain: .rust, imageOverride: nil, workspace: workspace,
-        root: runCacheRoot
-    )
-
-    #expect(withFlag == CacheMounts.forToolchain(.rust, scope: .shared, workspace: workspace, root: runCacheRoot))
-    #expect(repoOnly == CacheMounts.forToolchain(.rust, scope: .workspace, workspace: workspace, root: runCacheRoot))
-    #expect(Set(withFlag.map(\.hostPath)).isDisjoint(with: Set(repoOnly.map(\.hostPath))))
-    // The repo asked for the shared directory and must not have reached it.
-    #expect(withFlag.allSatisfy { $0.hostPath.hasPrefix(runCacheRoot.path + "/shared/") })
-    #expect(!repoOnly.contains { $0.hostPath.hasPrefix(runCacheRoot.path + "/shared/") })
 }
 
 @Test func aRunWithAnImageOverrideMountsNoCaches() throws {
     let workspace = try makeTempDir(files: [:])
 
     for scope in CacheScope.allCases {
-        #expect(
-            try RunRuntimePolicy.cacheMounts(
-                cacheOverride: scope.rawValue,
-                workspaceConfig: nil,
-                toolchain: .rust,
-                imageOverride: "ghcr.io/foo/bar",
-                workspace: workspace,
-                root: runCacheRoot
-            ).isEmpty
-        )
+        let run = try parsedRun(["--cache", scope.rawValue, "--image", "ghcr.io/foo/bar"])
+        let selection = try run.resolvedCacheSelection(workspaceConfig: nil)
+        #expect(selection.imageOverride == "ghcr.io/foo/bar")
+        #expect(selection.mounts(toolchain: .rust, workspace: workspace, root: runCacheRoot).isEmpty)
     }
 }
 
 @Test func aRunWithAnUnusableCacheFlagMountsNothingAndFails() throws {
-    let workspace = try makeTempDir(files: [:])
-
     #expect(throws: ValidationError.self) {
-        try RunRuntimePolicy.cacheMounts(
-            cacheOverride: "everyone",
-            workspaceConfig: nil,
-            toolchain: .rust,
-            imageOverride: nil,
-            workspace: workspace,
-            root: runCacheRoot
-        )
+        try parsedRun(["--cache", "everyone"]).resolvedCacheSelection(workspaceConfig: nil)
     }
 }
 

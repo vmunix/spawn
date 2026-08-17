@@ -126,6 +126,32 @@ extension Spawn {
             )
         }
 
+        /// Resolves cache policy from this parsed command's actual flags.
+        /// Tests call this boundary on a parsed `Spawn.Run`, so disconnecting
+        /// either `--cache` or `--image` from the launch fails without starting
+        /// a container.
+        func resolvedCacheSelection(
+            workspaceConfig: WorkspaceConfig?
+        ) throws -> RunRuntimePolicy.CacheSelection {
+            try RunRuntimePolicy.resolveCacheSelection(
+                cacheOverride: cache,
+                imageOverride: image,
+                workspaceConfig: workspaceConfig
+            )
+        }
+
+        /// The complete mount list handed to `ContainerRunner`.
+        ///
+        /// Keeping this boundary pure gives the final assembly — not just cache
+        /// policy — direct coverage. Cache mounts stay after the workspace and
+        /// state mounts so the primary workspace remains first.
+        static func launchMounts(
+            resolved: [Mount],
+            caches: [Mount]
+        ) -> [Mount] {
+            resolved + caches
+        }
+
         mutating func run() async throws {
             if verbose { logger.logLevel = .debug }
             command = Self.normalizedCommand(command)
@@ -168,21 +194,12 @@ extension Spawn {
             if access == nil, let configuredAccess = workspaceConfig?.accessProfile, configuredAccess != .minimal {
                 print("Warning: ignoring .spawn.toml access=\(configuredAccess.rawValue). Pass '--access \(configuredAccess.rawValue)' explicitly to opt into host auth exposure.")
             }
-            // Parsed here only to reject a bad '--cache' before any container
-            // work and to pick the notices; the caches a run mounts are
-            // derived by RunRuntimePolicy below.
-            let cacheScope = try CacheScope.parse(
-                RunRuntimePolicy.effectiveCacheScopeName(
-                    cacheOverride: cache,
-                    workspaceConfig: workspaceConfig
-                )
-            )
+            // One resolved value drives both notices and mounts. This also
+            // rejects a bad '--cache' before any container work.
+            let cacheSelection = try resolvedCacheSelection(workspaceConfig: workspaceConfig)
             for notice in RunLaunchSummary.cacheNotices(
-                scope: cacheScope,
-                ignoredConfiguredScope: RunRuntimePolicy.ignoredConfiguredCacheScope(
-                    cacheOverride: cache,
-                    workspaceConfig: workspaceConfig
-                )
+                scope: cacheSelection.scope,
+                ignoredConfiguredScope: cacheSelection.ignoredConfiguredScope
             ) {
                 print(notice)
             }
@@ -235,25 +252,21 @@ extension Spawn {
             }
 
             // Resolve mounts
-            let resolvedMounts = MountResolver.resolve(
-                target: path,
-                additional: mount,
-                readOnly: readOnlyMounts,
-                access: accessProfile,
-                agent: agent
-            )
-
-            // Build caches, appended so the workspace stays the first mount.
-            // Which caches a run gets is resolved by RunRuntimePolicy, not here:
-            // the scope a run mounts with is unit-tested there, and this path
-            // must not hold a second, untested copy of that decision.
-            let cacheMounts = CacheMounts.prepare(
-                try RunRuntimePolicy.cacheMounts(
-                    cacheOverride: cache,
-                    workspaceConfig: workspaceConfig,
-                    toolchain: resolvedToolchain,
-                    imageOverride: image,
-                    workspace: path
+            let launchMounts = Self.launchMounts(
+                resolved: MountResolver.resolve(
+                    target: path,
+                    additional: mount,
+                    readOnly: readOnlyMounts,
+                    access: accessProfile,
+                    agent: agent
+                ),
+                // The already-resolved launch decision owns both scope and the
+                // custom-image exclusion; this path makes no second cache decision.
+                caches: CacheMounts.prepare(
+                    cacheSelection.mounts(
+                        toolchain: resolvedToolchain,
+                        workspace: path
+                    )
                 )
             )
 
@@ -297,7 +310,7 @@ extension Spawn {
             }
 
             // Working directory — derived from the primary mount's guest path
-            let workdir = resolvedMounts[0].guestPath
+            let workdir = launchMounts[0].guestPath
 
             let summaryLines = RunLaunchSummary.lines(
                 workspace: path,
@@ -326,7 +339,7 @@ extension Spawn {
             // Run
             let status = try ContainerRunner.run(
                 image: resolvedImage,
-                mounts: resolvedMounts + cacheMounts,
+                mounts: launchMounts,
                 env: environment,
                 workdir: workdir,
                 entrypoint: entrypoint,

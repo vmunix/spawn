@@ -18,6 +18,13 @@ import Foundation
 /// tolerates concurrent runs, so the create/chown/rollback/lock machinery the
 /// block device needed is gone with it.
 enum CacheMounts: Sendable {
+    enum DirectoryStatus: Sendable, Equatable {
+        case missing
+        case ready
+        case notDirectory
+        case notWritable
+    }
+
     /// The scope key every shared cache lives under.
     ///
     /// It cannot collide with a workspace key: `WorkspaceIdentity.key` is a slug
@@ -114,8 +121,24 @@ enum CacheMounts: Sendable {
         return forToolchain(toolchain, scope: scope, workspace: workspace, root: root)
     }
 
-    /// Create the host directory behind every cache mount, dropping the ones
-    /// that cannot be made.
+    /// Inspect whether a host path can back a cache bind mount.
+    static func directoryStatus(
+        at path: String,
+        fileManager: FileManager = .default
+    ) -> DirectoryStatus {
+        var isDirectory: ObjCBool = false
+        guard fileManager.fileExists(atPath: path, isDirectory: &isDirectory) else {
+            return .missing
+        }
+        guard isDirectory.boolValue else { return .notDirectory }
+        guard fileManager.isWritableFile(atPath: path), fileManager.isExecutableFile(atPath: path) else {
+            return .notWritable
+        }
+        return .ready
+    }
+
+    /// Create the host directory behind every cache mount, dropping any path
+    /// that is not a writable, traversable directory after creation.
     ///
     /// Creating a cache is exactly this: `container` bind-mounts the directory
     /// through VirtioFS, which maps it to the guest user, so there is nothing to
@@ -129,6 +152,12 @@ enum CacheMounts: Sendable {
                     atPath: mount.hostPath,
                     withIntermediateDirectories: true
                 )
+                guard directoryStatus(at: mount.hostPath, fileManager: fileManager) == .ready else {
+                    logger.warning(
+                        "The build cache path \(mount.hostPath) is not a writable directory. Continuing without it."
+                    )
+                    return false
+                }
                 return true
             } catch {
                 logger.warning(
