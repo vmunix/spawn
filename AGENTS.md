@@ -72,7 +72,8 @@ RunCommand.run()
     or ImageResolver.resolve()           # when using spawn-managed runtimes
   → MountResolver.resolve()              # workspace, auth, agent state
   → EnvLoader.load/loadDefault()         # env file / defaults
-  → ContainerRunner.run()                # execv for TTY, Process otherwise
+  → ResolvedLaunchPlan.workspace()       # one backend-neutral launch value
+  → ContainerRunner.run(plan)            # execv for TTY, Process otherwise
 ```
 
 Toolchain detection priority:
@@ -130,7 +131,8 @@ Build caches are host directories under `<state>/caches/<scope-key>/<cache>`, bi
 ## Important Design Constraints
 
 - All container interaction goes through `ContainerRunner`
-- `ContainerRunner.buildArgs()` is pure and heavily tested
+- `RunCommand` resolves one `ResolvedLaunchPlan`; runtime adapters consume it without re-reading CLI or workspace config
+- `ContainerRunner.buildArgs(for:)` is pure and heavily tested
 - Interactive TTY runs use `execv`; non-TTY runs use `Foundation.Process`
 - Agent auth state is persisted under `~/.local/state/spawn/<agent>/`
 - Single-file bind mounts are avoided where VirtioFS rename behavior is problematic
@@ -167,6 +169,7 @@ Key files:
 - `Sources/WorkspaceImageRuntime.swift`: workspace-image planning, cache status, rebuild logic
 - `Sources/ToolchainDetector.swift`: detection and `.spawn.toml` loading
 - `Sources/MountResolver.swift`: workspace/auth/agent mounts
+- `Sources/ResolvedLaunchPlan.swift`: backend-neutral final image, mounts, environment, command, and resources
 - `Sources/ContainerRunner.swift`: container CLI boundary
 - `Sources/BuildCommand.swift`: spawn-managed image builds
 - `Sources/CacheMounts.swift`: per-toolchain build-cache host paths, scope, guest paths, and directory creation

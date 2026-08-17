@@ -140,16 +140,36 @@ extension Spawn {
             )
         }
 
-        /// The complete mount list handed to `ContainerRunner`.
-        ///
-        /// Keeping this boundary pure gives the final assembly — not just cache
-        /// policy — direct coverage. Cache mounts stay after the workspace and
-        /// state mounts so the primary workspace remains first.
-        static func launchMounts(
-            resolved: [Mount],
-            caches: [Mount]
-        ) -> [Mount] {
-            resolved + caches
+        /// Freeze this parsed command's final backend-neutral launch inputs.
+        func resolvedLaunchPlan(
+            image: String,
+            resolvedMounts: [Mount],
+            cacheSelection: RunRuntimePolicy.CacheSelection,
+            toolchain: Toolchain,
+            workspace: URL,
+            cacheRoot: URL = CacheMounts.root(),
+            environment: [String: String],
+            entrypoint: [String],
+            allocateTerminal: Bool = isatty(STDIN_FILENO) != 0
+        ) throws -> ResolvedLaunchPlan {
+            let preparedCacheMounts = CacheMounts.prepare(
+                cacheSelection.mounts(
+                    toolchain: toolchain,
+                    workspace: workspace,
+                    root: cacheRoot
+                )
+            )
+
+            return try ResolvedLaunchPlan.workspace(
+                image: image,
+                resolvedMounts: resolvedMounts,
+                preparedCacheMounts: preparedCacheMounts,
+                environment: environment,
+                entrypoint: entrypoint,
+                cpus: cpus,
+                memory: memory,
+                allocateTerminal: allocateTerminal
+            )
         }
 
         mutating func run() async throws {
@@ -252,24 +272,13 @@ extension Spawn {
             }
 
             // Resolve mounts
-            let launchMounts = Self.launchMounts(
-                resolved: MountResolver.resolve(
-                    target: path,
-                    additional: mount,
-                    readOnly: readOnlyMounts,
-                    access: accessProfile,
-                    agent: agent
-                ),
-                // The already-resolved launch decision owns both scope and the
-                // custom-image exclusion; this path makes no second cache decision.
-                caches: CacheMounts.prepare(
-                    cacheSelection.mounts(
-                        toolchain: resolvedToolchain,
-                        workspace: path
-                    )
-                )
+            let resolvedMounts = MountResolver.resolve(
+                target: path,
+                additional: mount,
+                readOnly: readOnlyMounts,
+                access: accessProfile,
+                agent: agent
             )
-
             // Load environment
             var environment: [String: String]
             if let envFile {
@@ -309,8 +318,15 @@ extension Spawn {
                 entrypoint = yolo ? profile.yoloEntrypoint : profile.safeEntrypoint
             }
 
-            // Working directory — derived from the primary mount's guest path
-            let workdir = launchMounts[0].guestPath
+            let launchPlan = try resolvedLaunchPlan(
+                image: resolvedImage,
+                resolvedMounts: resolvedMounts,
+                cacheSelection: cacheSelection,
+                toolchain: resolvedToolchain,
+                workspace: path,
+                environment: environment,
+                entrypoint: entrypoint
+            )
 
             let summaryLines = RunLaunchSummary.lines(
                 workspace: path,
@@ -337,15 +353,7 @@ extension Spawn {
             fflush(stdout)
 
             // Run
-            let status = try ContainerRunner.run(
-                image: resolvedImage,
-                mounts: launchMounts,
-                env: environment,
-                workdir: workdir,
-                entrypoint: entrypoint,
-                cpus: cpus,
-                memory: memory
-            )
+            let status = try ContainerRunner.run(launchPlan)
 
             if status != 0 {
                 throw ExitCode(status)

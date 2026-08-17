@@ -457,6 +457,92 @@ private let runCacheRoot = URL(fileURLWithPath: "/state/spawn/caches")
     }
 }
 
+// MARK: - Typed launch boundary
+
+@Test func parsedRunResolvesThePlanHandedToTheRuntime() throws {
+    let run = try parsedRun(["--cpus", "6", "--memory", "12g"])
+    let workspaceURL = try makeTempDir(files: [:])
+    let cacheRoot = try makeTempDir(files: [:])
+    let workspace = Mount(hostPath: workspaceURL.path, readOnly: false)
+    let state = Mount(
+        hostPath: "/state/codex",
+        guestPath: "/home/coder/.codex",
+        readOnly: false
+    )
+    let cacheSelection = try run.resolvedCacheSelection(workspaceConfig: nil)
+    let expectedCaches = CacheMounts.forToolchain(
+        .rust,
+        scope: .workspace,
+        workspace: workspaceURL,
+        root: cacheRoot
+    )
+
+    let plan = try run.resolvedLaunchPlan(
+        image: "spawn-rust:latest",
+        resolvedMounts: [workspace, state],
+        cacheSelection: cacheSelection,
+        toolchain: .rust,
+        workspace: workspaceURL,
+        cacheRoot: cacheRoot,
+        environment: ["SPAWN_SAFE_MODE": "1"],
+        entrypoint: ["cargo", "test"],
+        allocateTerminal: true
+    )
+
+    #expect(plan.image == "spawn-rust:latest")
+    #expect(plan.mounts == [workspace, state] + expectedCaches)
+    #expect(expectedCaches.allSatisfy { CacheMounts.directoryStatus(at: $0.hostPath) == .ready })
+    #expect(plan.environment == ["SPAWN_SAFE_MODE": "1"])
+    #expect(plan.workdir == workspace.guestPath)
+    #expect(plan.entrypoint == ["cargo", "test"])
+    #expect(plan.resources == .init(cpus: 6, memory: "12g"))
+    #expect(plan.io == .init(keepStandardInputOpen: true, allocateTerminal: true))
+    #expect(plan.removeOnExit)
+}
+
+@Test func parsedRunPlanPreservesSharedOptInAndCustomImageExclusion() throws {
+    let workspaceURL = try makeTempDir(files: [:])
+    let cacheRoot = try makeTempDir(files: [:])
+    let workspace = Mount(hostPath: workspaceURL.path, readOnly: false)
+
+    let sharedRun = try parsedRun(["--cache", "shared"])
+    let sharedPlan = try sharedRun.resolvedLaunchPlan(
+        image: "spawn-rust:latest",
+        resolvedMounts: [workspace],
+        cacheSelection: sharedRun.resolvedCacheSelection(workspaceConfig: nil),
+        toolchain: .rust,
+        workspace: workspaceURL,
+        cacheRoot: cacheRoot,
+        environment: [:],
+        entrypoint: ["true"],
+        allocateTerminal: false
+    )
+    let sharedCaches = CacheMounts.forToolchain(
+        .rust,
+        scope: .shared,
+        workspace: workspaceURL,
+        root: cacheRoot
+    )
+
+    let customRun = try parsedRun(["--image", "ghcr.io/example/custom:latest"])
+    let customPlan = try customRun.resolvedLaunchPlan(
+        image: "ghcr.io/example/custom:latest",
+        resolvedMounts: [workspace],
+        cacheSelection: customRun.resolvedCacheSelection(workspaceConfig: nil),
+        toolchain: .rust,
+        workspace: workspaceURL,
+        cacheRoot: cacheRoot,
+        environment: [:],
+        entrypoint: ["true"],
+        allocateTerminal: false
+    )
+
+    #expect(!sharedCaches.isEmpty)
+    #expect(sharedPlan.mounts == [workspace] + sharedCaches)
+    #expect(sharedCaches.allSatisfy { $0.hostPath.hasPrefix(cacheRoot.path + "/shared/") })
+    #expect(customPlan.mounts == [workspace])
+}
+
 // MARK: - What a run tells the user about its cache scope
 
 @Test func aSharedRunSaysTheCacheIsSharedAndAnOrdinaryRunSaysNothing() {

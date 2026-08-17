@@ -85,13 +85,15 @@ RunCommand.run()
                                   # Build or reuse a cached workspace image when requested
   → ImageResolver.resolve()       # Map toolchain to image name for spawn-managed runtimes
   → MountResolver.resolve()       # Build mount list
-  → RunRuntimePolicy.CacheSelection.mounts()
-                                  # Derive mount paths from the resolved policy
-  → CacheMounts.prepare()         # mkdir each host cache directory, appended to
-                                  # the mount list (VirtioFS maps them to the
-                                  # guest user, so no chown and no locking)
   → EnvLoader.load/loadDefault()  # Load env vars
-  → ContainerRunner.run()         # Launch container
+  → Run.resolvedLaunchPlan()
+    → RunRuntimePolicy.CacheSelection.mounts()
+                                  # Derive mount paths from the resolved policy
+    → CacheMounts.prepare()       # mkdir each host cache directory (VirtioFS maps
+                                  # it to the guest user, so no chown and no locking)
+    → ResolvedLaunchPlan.workspace()
+                                  # Freeze final backend-neutral launch inputs
+  → ContainerRunner.run(plan)     # Render and launch with Apple's CLI
 ```
 
 ## Design decisions

@@ -5,14 +5,15 @@ import Testing
 
 @Test func buildsBasicRunArguments() {
     let args = ContainerRunner.buildArgs(
-        image: "spawn-base:latest",
-        mounts: [Mount(hostPath: "/Users/me/code/project", readOnly: false)],
-        env: ["KEY": "value"],
-        workdir: "/workspace/project",
-        entrypoint: ["claude"],
-        cpus: 4,
-        memory: "8g"
-    )
+        for: makeLaunchPlan(
+            image: "spawn-base:latest",
+            mounts: [Mount(hostPath: "/Users/me/code/project", readOnly: false)],
+            env: ["KEY": "value"],
+            workdir: "/workspace/project",
+            entrypoint: ["claude"],
+            cpus: 4,
+            memory: "8g"
+        ))
 
     #expect(args.contains("run"))
     #expect(args.contains("--rm"))
@@ -22,18 +23,19 @@ import Testing
 
 @Test func includesAllMounts() {
     let args = ContainerRunner.buildArgs(
-        image: "spawn-rust:latest",
-        mounts: [
-            Mount(hostPath: "/code/project", readOnly: false),
-            Mount(hostPath: "/code/lib", readOnly: true),
-            Mount(hostPath: "/home/user/.gitconfig", guestPath: "/home/coder/.gitconfig", readOnly: true),
-        ],
-        env: [:],
-        workdir: "/workspace/project",
-        entrypoint: ["claude"],
-        cpus: 4,
-        memory: "8g"
-    )
+        for: makeLaunchPlan(
+            image: "spawn-rust:latest",
+            mounts: [
+                Mount(hostPath: "/code/project", readOnly: false),
+                Mount(hostPath: "/code/lib", readOnly: true),
+                Mount(hostPath: "/home/user/.gitconfig", guestPath: "/home/coder/.gitconfig", readOnly: true),
+            ],
+            env: [:],
+            workdir: "/workspace/project",
+            entrypoint: ["claude"],
+            cpus: 4,
+            memory: "8g"
+        ))
 
     let volumeCount = args.enumerated().filter { $0.element == "--volume" }.count
     #expect(volumeCount == 3)
@@ -41,14 +43,15 @@ import Testing
 
 @Test func includesEnvVars() {
     let args = ContainerRunner.buildArgs(
-        image: "spawn-base:latest",
-        mounts: [],
-        env: ["ANTHROPIC_API_KEY": "sk-123", "FOO": "bar"],
-        workdir: "/workspace/test",
-        entrypoint: ["claude"],
-        cpus: 2,
-        memory: "4g"
-    )
+        for: makeLaunchPlan(
+            image: "spawn-base:latest",
+            mounts: [],
+            env: ["ANTHROPIC_API_KEY": "sk-123", "FOO": "bar"],
+            workdir: "/workspace/test",
+            entrypoint: ["claude"],
+            cpus: 2,
+            memory: "4g"
+        ))
 
     let envCount = args.enumerated().filter { $0.element == "--env" }.count
     #expect(envCount == 2)
@@ -56,30 +59,65 @@ import Testing
 
 @Test func shellModeOverridesEntrypoint() {
     let args = ContainerRunner.buildArgs(
-        image: "spawn-base:latest",
-        mounts: [],
-        env: [:],
-        workdir: "/workspace/test",
-        entrypoint: ["/bin/bash"],
-        cpus: 4,
-        memory: "8g"
-    )
+        for: makeLaunchPlan(
+            image: "spawn-base:latest",
+            mounts: [],
+            env: [:],
+            workdir: "/workspace/test",
+            entrypoint: ["/bin/bash"],
+            cpus: 4,
+            memory: "8g"
+        ))
 
     #expect(args.last == "/bin/bash")
+}
+
+@Test func launchPlanControlsLifecycleAndTerminalFlags() {
+    let interactive = ContainerRunner.buildArgs(
+        for: makeLaunchPlan(
+            image: "spawn-base:latest",
+            mounts: [],
+            env: [:],
+            workdir: "/workspace/test",
+            entrypoint: ["true"],
+            cpus: 4,
+            memory: "8g",
+            allocateTerminal: true
+        ))
+    let noninteractive = ContainerRunner.buildArgs(
+        for: makeLaunchPlan(
+            image: "spawn-base:latest",
+            mounts: [],
+            env: [:],
+            workdir: "/workspace/test",
+            entrypoint: ["true"],
+            cpus: 4,
+            memory: "8g",
+            keepStandardInputOpen: false,
+            removeOnExit: false
+        ))
+
+    #expect(interactive.contains("--rm"))
+    #expect(interactive.contains("-i"))
+    #expect(interactive.contains("-t"))
+    #expect(!noninteractive.contains("--rm"))
+    #expect(!noninteractive.contains("-i"))
+    #expect(!noninteractive.contains("-t"))
 }
 
 // MARK: - Safe mode env var tests
 
 @Test func safeModeIncludesSafeEnvVar() {
     let args = ContainerRunner.buildArgs(
-        image: "spawn-base:latest",
-        mounts: [],
-        env: ["SPAWN_SAFE_MODE": "1"],
-        workdir: "/workspace/test",
-        entrypoint: ["claude"],
-        cpus: 4,
-        memory: "8g",
-    )
+        for: makeLaunchPlan(
+            image: "spawn-base:latest",
+            mounts: [],
+            env: ["SPAWN_SAFE_MODE": "1"],
+            workdir: "/workspace/test",
+            entrypoint: ["claude"],
+            cpus: 4,
+            memory: "8g",
+        ))
 
     let envArgs = zip(args, args.dropFirst()).filter { $0.0 == "--env" }.map(\.1)
     #expect(envArgs.contains("SPAWN_SAFE_MODE=1"))
@@ -87,14 +125,15 @@ import Testing
 
 @Test func yoloModeOmitsSafeEnvVar() {
     let args = ContainerRunner.buildArgs(
-        image: "spawn-base:latest",
-        mounts: [],
-        env: [:],
-        workdir: "/workspace/test",
-        entrypoint: ["claude", "--dangerously-skip-permissions"],
-        cpus: 4,
-        memory: "8g",
-    )
+        for: makeLaunchPlan(
+            image: "spawn-base:latest",
+            mounts: [],
+            env: [:],
+            workdir: "/workspace/test",
+            entrypoint: ["claude", "--dangerously-skip-permissions"],
+            cpus: 4,
+            memory: "8g",
+        ))
 
     let envArgs = zip(args, args.dropFirst()).filter { $0.0 == "--env" }.map(\.1)
     #expect(!envArgs.contains("SPAWN_SAFE_MODE=1"))
@@ -102,10 +141,10 @@ import Testing
 
 // MARK: - Build caches in the container argv
 
-@Test func buildArgsBindMountsBuildCachesAfterTheWorkspace() {
-    // Exercise Run's final mount assembly before rendering the container argv.
-    // Testing CacheMounts alone would stay green if run() stopped handing those
-    // mounts to ContainerRunner.
+@Test func buildArgsBindMountsBuildCachesAfterTheWorkspace() throws {
+    // Resolve the same typed plan Run hands to ContainerRunner, then render it.
+    // Testing CacheMounts alone would stay green if final plan assembly dropped
+    // the caches.
     let caches = CacheMounts.forToolchain(
         .rust,
         scope: .workspace,
@@ -113,22 +152,20 @@ import Testing
         root: URL(fileURLWithPath: "/state/caches")
     )
     let workspaceMount = Mount(hostPath: "/code/project", readOnly: false)
-    let launchMounts = Spawn.Run.launchMounts(
-        resolved: [workspaceMount],
-        caches: caches
-    )
-    let args = ContainerRunner.buildArgs(
+    let plan = try ResolvedLaunchPlan.workspace(
         image: "spawn-rust:latest",
-        mounts: launchMounts,
-        env: [:],
-        workdir: "/workspace/project",
+        resolvedMounts: [workspaceMount],
+        preparedCacheMounts: caches,
+        environment: [:],
         entrypoint: ["true"],
         cpus: 4,
-        memory: "8g"
+        memory: "8g",
+        allocateTerminal: false
     )
+    let args = ContainerRunner.buildArgs(for: plan)
 
     #expect(caches.count == 2)
-    #expect(launchMounts == [workspaceMount] + caches)
+    #expect(plan.mounts == [workspaceMount] + caches)
     let volumeSpecs = zip(args, args.dropFirst()).filter { $0.0 == "--volume" }.map(\.1)
     #expect(
         volumeSpecs == ["/code/project:/workspace/project"] + caches.map { "\($0.hostPath):\($0.guestPath)" }

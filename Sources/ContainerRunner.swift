@@ -86,30 +86,26 @@ enum ContainerRunner: Sendable {
     }
 
     /// Build the argument array for `container run`. Pure function — no side effects.
-    static func buildArgs(
-        image: String,
-        mounts: [Mount],
-        env: [String: String],
-        workdir: String,
-        entrypoint: [String],
-        cpus: Int,
-        memory: String
-    ) -> [String] {
-        var args = ["run", "--rm", "-i"]
+    static func buildArgs(for plan: ResolvedLaunchPlan) -> [String] {
+        var args = ["run"]
 
-        // Allocate a TTY when stdin is a real terminal.
-        // This is required for interactive use (unbuffered output, line editing).
-        // Apple's container CLI v0.9.0 requires a real host TTY for -t to work.
-        if isatty(STDIN_FILENO) != 0 {
+        if plan.removeOnExit {
+            args.append("--rm")
+        }
+        if plan.io.keepStandardInputOpen {
+            args.append("-i")
+        }
+
+        if plan.io.allocateTerminal {
             args.append("-t")
         }
 
         // Resources
-        args += ["--cpus", "\(cpus)"]
-        args += ["--memory", "\(memory)"]
+        args += ["--cpus", "\(plan.resources.cpus)"]
+        args += ["--memory", plan.resources.memory]
 
         // Mounts
-        for mount in mounts {
+        for mount in plan.mounts {
             let spec =
                 mount.readOnly
                 ? "\(mount.hostPath):\(mount.guestPath):ro"
@@ -118,49 +114,37 @@ enum ContainerRunner: Sendable {
         }
 
         // Environment (sorted for deterministic output)
-        for (key, value) in env.sorted(by: { $0.key < $1.key }) {
+        for (key, value) in plan.environment.sorted(by: { $0.key < $1.key }) {
             args += ["--env", "\(key)=\(value)"]
         }
 
         // Working directory
-        args += ["--workdir", workdir]
+        args += ["--workdir", plan.workdir]
 
         // Image
-        args.append(image)
+        args.append(plan.image)
 
         // Entrypoint / command
-        args += entrypoint
+        args += plan.entrypoint
 
         return args
     }
 
-    /// Launch a container. Uses `execv` when stdin is a TTY (for direct terminal access),
-    /// falls back to `Foundation.Process` with signal forwarding otherwise.
-    static func run(
-        image: String,
-        mounts: [Mount],
-        env: [String: String],
-        workdir: String,
-        entrypoint: [String],
-        cpus: Int,
-        memory: String
-    ) throws -> Int32 {
+    /// Launch a container. Uses `execv` when the plan requests a terminal,
+    /// and falls back to `Foundation.Process` with signal forwarding otherwise.
+    static func run(_ plan: ResolvedLaunchPlan) throws -> Int32 {
         try preflight()
         let binary = try resolvedContainerPath()
 
-        let args = buildArgs(
-            image: image, mounts: mounts, env: env,
-            workdir: workdir, entrypoint: entrypoint,
-            cpus: cpus, memory: memory
-        )
+        let args = buildArgs(for: plan)
 
         let cmd = ([binary] + sanitizeForLogging(args)).joined(separator: " ")
         logger.debug("+ \(cmd)")
 
-        // When stdin is a TTY, replace our process with `container` via execv.
+        // When the plan requests a TTY, replace our process with `container` via execv.
         // This gives the container CLI direct terminal access (needed for -t flag,
         // raw mode, and proper interactive I/O). No intermediary process.
-        if isatty(STDIN_FILENO) != 0 {
+        if plan.io.allocateTerminal {
             let cArgs = [binary] + args
             let cStrings: [UnsafeMutablePointer<CChar>?] = cArgs.map { strdup($0) }
             let argv = cStrings + [nil]
@@ -174,7 +158,7 @@ enum ContainerRunner: Sendable {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: binary)
         process.arguments = args
-        process.standardInput = FileHandle.standardInput
+        process.standardInput = plan.io.keepStandardInputOpen ? FileHandle.standardInput : FileHandle.nullDevice
         process.standardOutput = FileHandle.standardOutput
         process.standardError = FileHandle.standardError
 
