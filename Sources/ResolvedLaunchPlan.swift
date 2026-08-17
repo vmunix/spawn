@@ -1,3 +1,13 @@
+/// A resolved launch, paired with everything the caller must say about it.
+///
+/// The plan and the notices are produced together from one cache decision, so a
+/// run cannot warn about one cache scope while mounting another: there is no
+/// second value for a caller to pass, print, or forget.
+struct ResolvedLaunch: Sendable, Equatable {
+    let plan: ResolvedLaunchPlan
+    let cacheNotices: [String]
+}
+
 /// A fully resolved, backend-neutral container launch.
 ///
 /// Policy, workspace inspection, image selection, cache preparation, and

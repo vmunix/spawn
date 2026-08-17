@@ -425,6 +425,40 @@ private func sharedCaches(_ toolchain: Toolchain, in workspace: URL = workspaceA
     #expect(CacheMounts.prepare(caches).isEmpty)
 }
 
+@Test func aPreexistingNonTraversableCacheDirectoryIsDroppedNotMounted() throws {
+    // Mode 0o200 is the case that separates traversable from writable: the
+    // directory is writable, so a writability check alone passes it, but nothing
+    // inside can be reached, so every cache read through the bind mount fails.
+    // `createDirectory(withIntermediateDirectories:)` succeeds on a directory
+    // that already exists whatever its mode, so `prepare` reaches the status
+    // check rather than being rejected earlier by the create.
+    let root = try makeTempDir(files: [:]).appendingPathComponent("caches")
+    let caches = privateCaches(.go, root: root)
+    let cache = try #require(caches.first)
+    try FileManager.default.createDirectory(
+        atPath: cache.hostPath,
+        withIntermediateDirectories: true
+    )
+    try FileManager.default.setAttributes(
+        [.posixPermissions: 0o200],
+        ofItemAtPath: cache.hostPath
+    )
+    defer {
+        try? FileManager.default.setAttributes(
+            [.posixPermissions: 0o700],
+            ofItemAtPath: cache.hostPath
+        )
+    }
+
+    // Guard the premise: a mode that failed the writability check too would
+    // leave the traversability check unexercised.
+    #expect(FileManager.default.isWritableFile(atPath: cache.hostPath))
+    #expect(!FileManager.default.isExecutableFile(atPath: cache.hostPath))
+
+    #expect(CacheMounts.directoryStatus(at: cache.hostPath) == .notWritable)
+    #expect(CacheMounts.prepare(caches).isEmpty)
+}
+
 @Test func preparingNoCachesTouchesNothing() throws {
     let root = try makeTempDir(files: [:]).appendingPathComponent("caches")
 

@@ -140,18 +140,31 @@ extension Spawn {
             )
         }
 
-        /// Freeze this parsed command's final backend-neutral launch inputs.
-        func resolvedLaunchPlan(
+        /// Freeze this parsed command's final backend-neutral launch inputs,
+        /// together with what it must tell the user about its build caches.
+        ///
+        /// The cache decision is resolved here rather than accepted as an
+        /// argument: `run()` has no cache scope to pass, so it cannot hand the
+        /// runtime a scope other than the one whose notices it prints. The plan's
+        /// cache mounts and the returned notices come from one `CacheSelection`
+        /// derived from this command's own `--cache` and `--image`.
+        ///
+        /// `workspaceConfig` feeds only the "this repo asked to share and was
+        /// refused" notice. Repository configuration can never widen the scope —
+        /// `resolveCacheSelection` discards anything but a narrowing — so it
+        /// cannot move the mounted directories, whatever is passed here.
+        func resolvedLaunch(
             image: String,
             resolvedMounts: [Mount],
-            cacheSelection: RunRuntimePolicy.CacheSelection,
             toolchain: Toolchain,
             workspace: URL,
+            workspaceConfig: WorkspaceConfig?,
             cacheRoot: URL = CacheMounts.root(),
             environment: [String: String],
             entrypoint: [String],
             allocateTerminal: Bool = isatty(STDIN_FILENO) != 0
-        ) throws -> ResolvedLaunchPlan {
+        ) throws -> ResolvedLaunch {
+            let cacheSelection = try resolvedCacheSelection(workspaceConfig: workspaceConfig)
             let preparedCacheMounts = CacheMounts.prepare(
                 cacheSelection.mounts(
                     toolchain: toolchain,
@@ -160,7 +173,7 @@ extension Spawn {
                 )
             )
 
-            return try ResolvedLaunchPlan.workspace(
+            let plan = try ResolvedLaunchPlan.workspace(
                 image: image,
                 resolvedMounts: resolvedMounts,
                 preparedCacheMounts: preparedCacheMounts,
@@ -169,6 +182,14 @@ extension Spawn {
                 cpus: cpus,
                 memory: memory,
                 allocateTerminal: allocateTerminal
+            )
+
+            return ResolvedLaunch(
+                plan: plan,
+                cacheNotices: RunLaunchSummary.cacheNotices(
+                    scope: cacheSelection.scope,
+                    ignoredConfiguredScope: cacheSelection.ignoredConfiguredScope
+                )
             )
         }
 
@@ -214,15 +235,12 @@ extension Spawn {
             if access == nil, let configuredAccess = workspaceConfig?.accessProfile, configuredAccess != .minimal {
                 print("Warning: ignoring .spawn.toml access=\(configuredAccess.rawValue). Pass '--access \(configuredAccess.rawValue)' explicitly to opt into host auth exposure.")
             }
-            // One resolved value drives both notices and mounts. This also
-            // rejects a bad '--cache' before any container work.
-            let cacheSelection = try resolvedCacheSelection(workspaceConfig: workspaceConfig)
-            for notice in RunLaunchSummary.cacheNotices(
-                scope: cacheSelection.scope,
-                ignoredConfiguredScope: cacheSelection.ignoredConfiguredScope
-            ) {
-                print(notice)
-            }
+            // Reject a bad '--cache' before any container work. The resolved
+            // value is deliberately discarded: `resolvedLaunch` below derives it
+            // again from these same flags so that the mounts and the notices
+            // cannot come from different decisions, and by then a workspace image
+            // may already have been built.
+            _ = try resolvedCacheSelection(workspaceConfig: workspaceConfig)
             let runtimeMode = try RuntimeMode.parse(runtime)
             try RunRuntimePolicy.validateOptions(
                 runtimeMode: runtimeMode,
@@ -318,15 +336,18 @@ extension Spawn {
                 entrypoint = yolo ? profile.yoloEntrypoint : profile.safeEntrypoint
             }
 
-            let launchPlan = try resolvedLaunchPlan(
+            let launch = try resolvedLaunch(
                 image: resolvedImage,
                 resolvedMounts: resolvedMounts,
-                cacheSelection: cacheSelection,
                 toolchain: resolvedToolchain,
                 workspace: path,
+                workspaceConfig: workspaceConfig,
                 environment: environment,
                 entrypoint: entrypoint
             )
+            for notice in launch.cacheNotices {
+                print(notice)
+            }
 
             let summaryLines = RunLaunchSummary.lines(
                 workspace: path,
@@ -353,7 +374,7 @@ extension Spawn {
             fflush(stdout)
 
             // Run
-            let status = try ContainerRunner.run(launchPlan)
+            let status = try ContainerRunner.run(launch.plan)
 
             if status != 0 {
                 throw ExitCode(status)

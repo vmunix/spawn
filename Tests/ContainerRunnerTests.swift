@@ -139,6 +139,25 @@ import Testing
     #expect(!envArgs.contains("SPAWN_SAFE_MODE=1"))
 }
 
+@Test func buildArgsRendersEnvironmentInSortedKeyOrder() {
+    // A dictionary has no order of its own, so the sort is the only thing making
+    // the logged and executed container command reproducible between runs. The
+    // keys here are deliberately unsorted in the literal.
+    let args = ContainerRunner.buildArgs(
+        for: makeLaunchPlan(
+            image: "spawn-base:latest",
+            mounts: [],
+            env: ["ZULU": "3", "ALPHA": "1", "MIKE": "2"],
+            workdir: "/workspace/test",
+            entrypoint: ["true"],
+            cpus: 4,
+            memory: "8g"
+        ))
+
+    let envArgs = zip(args, args.dropFirst()).filter { $0.0 == "--env" }.map(\.1)
+    #expect(envArgs == ["ALPHA=1", "MIKE=2", "ZULU=3"])
+}
+
 // MARK: - Build caches in the container argv
 
 @Test func buildArgsBindMountsBuildCachesAfterTheWorkspace() throws {
@@ -166,6 +185,11 @@ import Testing
 
     #expect(caches.count == 2)
     #expect(plan.mounts == [workspaceMount] + caches)
+    // The rendered working directory, not just the derived one: it comes from the
+    // primary mount, and the cache mounts appended after it must not displace it.
+    let workdirValues = zip(args, args.dropFirst()).filter { $0.0 == "--workdir" }.map(\.1)
+    #expect(plan.workdir == "/workspace/project")
+    #expect(workdirValues == [plan.workdir])
     let volumeSpecs = zip(args, args.dropFirst()).filter { $0.0 == "--volume" }.map(\.1)
     #expect(
         volumeSpecs == ["/code/project:/workspace/project"] + caches.map { "\($0.hostPath):\($0.guestPath)" }

@@ -76,8 +76,8 @@ RunCommand.run()
                                   # Load `.spawn.toml` workspace defaults
   → AgentProfile.named()          # Validate resolved agent (CLI/config/default)
   → RunRuntimePolicy.resolveCacheSelection()
-                                  # Resolve cache scope, ignored repo config,
-                                  # and the --image cache exclusion once
+                                  # Reject an unusable --cache before any
+                                  # container work; the value is discarded
   → SettingsSeeder.seed()         # Seed safe-mode permissions (claude-code only)
   → ToolchainDetector.detect()    # Auto-detect or use override
   → RuntimeMode.parse()           # Decide whether auto/spawn/workspace-image applies
@@ -86,14 +86,19 @@ RunCommand.run()
   → ImageResolver.resolve()       # Map toolchain to image name for spawn-managed runtimes
   → MountResolver.resolve()       # Build mount list
   → EnvLoader.load/loadDefault()  # Load env vars
-  → Run.resolvedLaunchPlan()
+  → Run.resolvedLaunch()          # Resolve cache scope, ignored repo config, and
+                                  # the --image cache exclusion once, then keep the
+                                  # mounts and their notices in one value
     → RunRuntimePolicy.CacheSelection.mounts()
                                   # Derive mount paths from the resolved policy
     → CacheMounts.prepare()       # mkdir each host cache directory (VirtioFS maps
                                   # it to the guest user, so no chown and no locking)
     → ResolvedLaunchPlan.workspace()
                                   # Freeze final backend-neutral launch inputs
-  → ContainerRunner.run(plan)     # Render and launch with Apple's CLI
+    → RunLaunchSummary.cacheNotices()
+                                  # Warn about exactly the scope just mounted
+  → ContainerRunner.run(launch.plan)
+                                  # Render and launch with Apple's CLI
 ```
 
 ## Design decisions
