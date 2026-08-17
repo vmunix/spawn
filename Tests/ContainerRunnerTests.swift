@@ -3,8 +3,53 @@ import Testing
 
 @testable import spawn
 
+@Test func cliAdapterRendersEveryLaunchPlanFieldExactly() {
+    let plan = makeLaunchPlan(
+        image: "registry.example/spawn:test",
+        mounts: [
+            Mount(hostPath: "/host/work", guestPath: "/workspace/work", readOnly: false),
+            Mount(hostPath: "/host/config", guestPath: "/container/config", readOnly: true),
+        ],
+        env: ["Z_LAST": "two words", "A_FIRST": "one"],
+        workdir: "/workspace/work/subdir",
+        entrypoint: ["/bin/sh", "-lc", "printf done"],
+        cpus: 7,
+        memory: "13g",
+        keepStandardInputOpen: true,
+        allocateTerminal: true,
+        removeOnExit: true
+    )
+
+    #expect(
+        AppleContainerCLIRuntime.buildArgs(for: plan) == [
+            "run",
+            "--rm",
+            "-i",
+            "-t",
+            "--cpus",
+            "7",
+            "--memory",
+            "13g",
+            "--volume",
+            "/host/work:/workspace/work",
+            "--volume",
+            "/host/config:/container/config:ro",
+            "--env",
+            "A_FIRST=one",
+            "--env",
+            "Z_LAST=two words",
+            "--workdir",
+            "/workspace/work/subdir",
+            "registry.example/spawn:test",
+            "/bin/sh",
+            "-lc",
+            "printf done",
+        ]
+    )
+}
+
 @Test func buildsBasicRunArguments() {
-    let args = ContainerRunner.buildArgs(
+    let args = AppleContainerCLIRuntime.buildArgs(
         for: makeLaunchPlan(
             image: "spawn-base:latest",
             mounts: [Mount(hostPath: "/Users/me/code/project", readOnly: false)],
@@ -22,7 +67,7 @@ import Testing
 }
 
 @Test func includesAllMounts() {
-    let args = ContainerRunner.buildArgs(
+    let args = AppleContainerCLIRuntime.buildArgs(
         for: makeLaunchPlan(
             image: "spawn-rust:latest",
             mounts: [
@@ -42,7 +87,7 @@ import Testing
 }
 
 @Test func includesEnvVars() {
-    let args = ContainerRunner.buildArgs(
+    let args = AppleContainerCLIRuntime.buildArgs(
         for: makeLaunchPlan(
             image: "spawn-base:latest",
             mounts: [],
@@ -58,7 +103,7 @@ import Testing
 }
 
 @Test func shellModeOverridesEntrypoint() {
-    let args = ContainerRunner.buildArgs(
+    let args = AppleContainerCLIRuntime.buildArgs(
         for: makeLaunchPlan(
             image: "spawn-base:latest",
             mounts: [],
@@ -73,7 +118,7 @@ import Testing
 }
 
 @Test func launchPlanControlsLifecycleAndTerminalFlags() {
-    let interactive = ContainerRunner.buildArgs(
+    let interactive = AppleContainerCLIRuntime.buildArgs(
         for: makeLaunchPlan(
             image: "spawn-base:latest",
             mounts: [],
@@ -84,7 +129,7 @@ import Testing
             memory: "8g",
             allocateTerminal: true
         ))
-    let noninteractive = ContainerRunner.buildArgs(
+    let noninteractive = AppleContainerCLIRuntime.buildArgs(
         for: makeLaunchPlan(
             image: "spawn-base:latest",
             mounts: [],
@@ -108,7 +153,7 @@ import Testing
 // MARK: - Safe mode env var tests
 
 @Test func safeModeIncludesSafeEnvVar() {
-    let args = ContainerRunner.buildArgs(
+    let args = AppleContainerCLIRuntime.buildArgs(
         for: makeLaunchPlan(
             image: "spawn-base:latest",
             mounts: [],
@@ -124,7 +169,7 @@ import Testing
 }
 
 @Test func yoloModeOmitsSafeEnvVar() {
-    let args = ContainerRunner.buildArgs(
+    let args = AppleContainerCLIRuntime.buildArgs(
         for: makeLaunchPlan(
             image: "spawn-base:latest",
             mounts: [],
@@ -143,7 +188,7 @@ import Testing
     // A dictionary has no order of its own, so the sort is the only thing making
     // the logged and executed container command reproducible between runs. The
     // keys here are deliberately unsorted in the literal.
-    let args = ContainerRunner.buildArgs(
+    let args = AppleContainerCLIRuntime.buildArgs(
         for: makeLaunchPlan(
             image: "spawn-base:latest",
             mounts: [],
@@ -161,7 +206,7 @@ import Testing
 // MARK: - Build caches in the container argv
 
 @Test func buildArgsBindMountsBuildCachesAfterTheWorkspace() throws {
-    // Resolve the same typed plan Run hands to ContainerRunner, then render it.
+    // Resolve the same typed plan Run hands to its runtime, then render it.
     // Testing CacheMounts alone would stay green if final plan assembly dropped
     // the caches.
     let caches = CacheMounts.forToolchain(
@@ -181,7 +226,7 @@ import Testing
         memory: "8g",
         allocateTerminal: false
     )
-    let args = ContainerRunner.buildArgs(for: plan)
+    let args = AppleContainerCLIRuntime.buildArgs(for: plan)
 
     #expect(caches.count == 2)
     #expect(plan.mounts == [workspaceMount] + caches)

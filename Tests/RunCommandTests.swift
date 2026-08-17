@@ -335,6 +335,27 @@ private func parsedRun(_ arguments: [String]) throws -> Spawn.Run {
 /// a path from the real state directory.
 private let runCacheRoot = URL(fileURLWithPath: "/state/spawn/caches")
 
+private final class RecordingContainerRuntime: ContainerRuntime, @unchecked Sendable {
+    private let lock = NSLock()
+    private var recordedPlans: [ResolvedLaunchPlan] = []
+    let status: Int32
+
+    init(status: Int32 = 0) {
+        self.status = status
+    }
+
+    func launch(_ plan: ResolvedLaunchPlan) throws -> Int32 {
+        lock.withLock {
+            recordedPlans.append(plan)
+        }
+        return status
+    }
+
+    var plans: [ResolvedLaunchPlan] {
+        lock.withLock { recordedPlans }
+    }
+}
+
 @Test func cacheScopeDefaultsToTheWorkspacePrivateScope() throws {
     let selection = try parsedRun([]).resolvedCacheSelection(workspaceConfig: nil)
     #expect(selection.scope == .workspace)
@@ -465,6 +486,84 @@ private let runCacheRoot = URL(fileURLWithPath: "/state/spawn/caches")
 // decision from the parsed command itself and returns both the plan the runtime
 // receives and the notices printed beside it. There is no cache scope for `run()`
 // to pass, so these tests cover the launch as the real command performs it.
+
+@Test func parsedRunExecutesItsResolvedPlanThroughTheInjectedRuntime() async throws {
+    let workspace = try makeTempDir(files: [:])
+    let imageStore = try makeTempDir(files: ["state.json": #"{"spawn-base:latest":{}}"#])
+    let stateDir = try makeTempDir(files: [:])
+    var run = try parsedRun([
+        "--agent",
+        "codex",
+        "-C",
+        workspace.path,
+        "--image",
+        "spawn-base:latest",
+        "--cpus",
+        "17",
+        "--memory",
+        "19g",
+        "--",
+        "/bin/echo",
+        "runtime-handoff-sentinel",
+    ])
+    let runtime = RecordingContainerRuntime()
+
+    try await run.run(using: runtime, imageStoreRoot: imageStore, stateDir: stateDir)
+
+    #expect(runtime.plans.count == 1)
+    let plan = try #require(runtime.plans.first)
+    #expect(plan.image == "spawn-base:latest")
+    #expect(plan.mounts.first == Mount(hostPath: workspace.path, readOnly: false))
+    #expect(plan.workdir == "/workspace/\(workspace.lastPathComponent)")
+    #expect(plan.entrypoint == ["/bin/echo", "runtime-handoff-sentinel"])
+    #expect(plan.resources == .init(cpus: 17, memory: "19g"))
+    #expect(plan.io.keepStandardInputOpen)
+    #expect(plan.removeOnExit)
+}
+
+@Test func runCommandHandsItsExactResolvedPlanToTheInjectedRuntime() throws {
+    let run = try parsedRun([])
+    let runtime = RecordingContainerRuntime()
+    let plan = makeLaunchPlan(
+        image: "mutation-sentinel:image",
+        mounts: [Mount(hostPath: "/mutation/host", guestPath: "/mutation/guest", readOnly: true)],
+        env: ["MUTATION_SENTINEL": "present"],
+        workdir: "/mutation/workdir",
+        entrypoint: ["mutation-entrypoint", "unique-argument"],
+        cpus: 17,
+        memory: "19g",
+        keepStandardInputOpen: false,
+        allocateTerminal: true,
+        removeOnExit: false
+    )
+    let launch = ResolvedLaunch(plan: plan, cacheNotices: ["not runtime input"])
+
+    try run.executeLaunch(launch, using: runtime)
+
+    #expect(runtime.plans == [plan])
+}
+
+@Test func runCommandPreservesRuntimeExitStatus() throws {
+    let run = try parsedRun([])
+    let runtime = RecordingContainerRuntime(status: 37)
+    let launch = ResolvedLaunch(
+        plan: makeLaunchPlan(
+            image: "spawn-base:latest",
+            mounts: [],
+            env: [:],
+            workdir: "/workspace/test",
+            entrypoint: ["false"],
+            cpus: 1,
+            memory: "1g"
+        ),
+        cacheNotices: []
+    )
+
+    #expect(throws: ExitCode(37)) {
+        try run.executeLaunch(launch, using: runtime)
+    }
+    #expect(runtime.plans == [launch.plan])
+}
 
 @Test func parsedRunResolvesThePlanHandedToTheRuntime() throws {
     let run = try parsedRun(["--cpus", "6", "--memory", "12g"])

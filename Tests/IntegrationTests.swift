@@ -21,7 +21,7 @@ import Testing
     #expect(mounts[0].guestPath.hasPrefix("/workspace/"))
 
     // Build args
-    let args = ContainerRunner.buildArgs(
+    let args = AppleContainerCLIRuntime.buildArgs(
         for: makeLaunchPlan(
             image: image,
             mounts: mounts,
@@ -47,7 +47,7 @@ import Testing
     let image = try ImageResolver.resolve(toolchain: toolchain ?? .base, imageOverride: nil)
     #expect(image == "spawn-go:latest")
 
-    let args = ContainerRunner.buildArgs(
+    let args = AppleContainerCLIRuntime.buildArgs(
         for: makeLaunchPlan(
             image: image,
             mounts: [Mount(hostPath: target.path, readOnly: false)],
@@ -72,7 +72,7 @@ import Testing
     let image = try ImageResolver.resolve(toolchain: toolchain ?? .base, imageOverride: nil)
     #expect(image == "spawn-js:latest")
 
-    let args = ContainerRunner.buildArgs(
+    let args = AppleContainerCLIRuntime.buildArgs(
         for: makeLaunchPlan(
             image: image,
             mounts: [Mount(hostPath: target.path, readOnly: false)],
@@ -108,7 +108,7 @@ import Testing
         stateDir: stateDir,
         homeDirectory: home
     )
-    let args = ContainerRunner.buildArgs(
+    let args = AppleContainerCLIRuntime.buildArgs(
         for: makeLaunchPlan(
             image: "spawn-rust:latest",
             mounts: mounts,

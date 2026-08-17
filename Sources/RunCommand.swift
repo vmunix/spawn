@@ -193,7 +193,31 @@ extension Spawn {
             )
         }
 
+        /// The single handoff from command orchestration to container execution.
+        /// Keeping status translation here makes every runtime obey the same CLI
+        /// exit behavior.
+        func executeLaunch(
+            _ launch: ResolvedLaunch,
+            using containerRuntime: any ContainerRuntime
+        ) throws {
+            let status = try containerRuntime.launch(launch.plan)
+            if status != 0 {
+                throw ExitCode(status)
+            }
+        }
+
         mutating func run() async throws {
+            try await run(using: ContainerRuntimes.defaultRuntime())
+        }
+
+        /// Execute the parsed command through one injected semantic runtime.
+        /// Production supplies the default adapter above; tests use this same
+        /// path to prove the final resolved plan crosses the runtime boundary.
+        mutating func run(
+            using containerRuntime: any ContainerRuntime,
+            imageStoreRoot: URL? = nil,
+            stateDir: URL = Paths.stateDir
+        ) async throws {
             if verbose { logger.logLevel = .debug }
             command = Self.normalizedCommand(command)
 
@@ -273,7 +297,8 @@ extension Spawn {
                 let managedImage = try ManagedImagePolicy.resolve(
                     detection: detection,
                     toolchainOverride: toolchain,
-                    imageOverride: image
+                    imageOverride: image,
+                    storeRoot: imageStoreRoot
                 )
                 resolvedToolchain = managedImage.toolchain
                 resolvedImage = managedImage.image
@@ -284,7 +309,7 @@ extension Spawn {
 
             // Seed Claude Code safe-mode permissions
             if !yolo, command.isEmpty, !shell, agent == "claude-code" {
-                let claudeSettingsDir = Paths.stateDir.appendingPathComponent(agent)
+                let claudeSettingsDir = stateDir.appendingPathComponent(agent)
                     .appendingPathComponent("claude")
                 SettingsSeeder.seed(settingsDir: claudeSettingsDir)
             }
@@ -295,7 +320,8 @@ extension Spawn {
                 additional: mount,
                 readOnly: readOnlyMounts,
                 access: accessProfile,
-                agent: agent
+                agent: agent,
+                stateDir: stateDir
             )
             // Load environment
             var environment: [String: String]
@@ -342,6 +368,7 @@ extension Spawn {
                 toolchain: resolvedToolchain,
                 workspace: path,
                 workspaceConfig: workspaceConfig,
+                cacheRoot: CacheMounts.root(stateDir: stateDir),
                 environment: environment,
                 entrypoint: entrypoint
             )
@@ -374,11 +401,7 @@ extension Spawn {
             fflush(stdout)
 
             // Run
-            let status = try ContainerRunner.run(launch.plan)
-
-            if status != 0 {
-                throw ExitCode(status)
-            }
+            try executeLaunch(launch, using: containerRuntime)
         }
     }
 }

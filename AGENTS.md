@@ -73,7 +73,8 @@ RunCommand.run()
   → MountResolver.resolve()              # workspace, auth, agent state
   → EnvLoader.load/loadDefault()         # env file / defaults
   → ResolvedLaunchPlan.workspace()       # one backend-neutral launch value
-  → ContainerRunner.run(plan)            # execv for TTY, Process otherwise
+  → ContainerRuntime.launch(plan)        # semantic launch boundary
+    → AppleContainerCLIRuntime            # execv for TTY, Process otherwise
 ```
 
 Toolchain detection priority:
@@ -130,9 +131,10 @@ Build caches are host directories under `<state>/caches/<scope-key>/<cache>`, bi
 
 ## Important Design Constraints
 
-- All container interaction goes through `ContainerRunner`
+- Workspace launches cross `ContainerRuntime` as a `ResolvedLaunchPlan`; CLI arguments and process details stay in runtime adapters
+- Raw operational `container` CLI commands remain in `ContainerRunner` and are intentionally outside `ContainerRuntime`
 - `RunCommand` resolves one `ResolvedLaunchPlan`; runtime adapters consume it without re-reading CLI or workspace config
-- `ContainerRunner.buildArgs(for:)` is pure and heavily tested
+- `AppleContainerCLIRuntime.buildArgs(for:)` is pure and heavily tested
 - Interactive TTY runs use `execv`; non-TTY runs use `Foundation.Process`
 - Agent auth state is persisted under `~/.local/state/spawn/<agent>/`
 - Single-file bind mounts are avoided where VirtioFS rename behavior is problematic
@@ -184,7 +186,9 @@ Key files:
 - `Sources/ToolchainDetector.swift`: detection and `.spawn.toml` loading
 - `Sources/MountResolver.swift`: workspace/auth/agent mounts
 - `Sources/ResolvedLaunchPlan.swift`: backend-neutral final image, mounts, environment, command, and resources
-- `Sources/ContainerRunner.swift`: container CLI boundary
+- `Sources/ContainerRuntime.swift`: semantic workspace-launch boundary
+- `Sources/AppleContainerCLIRuntime.swift`: `container run` adapter and execution behavior
+- `Sources/ContainerRunner.swift`: `container` CLI discovery, preflight, and raw operational commands
 - `Sources/BuildCommand.swift`: spawn-managed image builds
 - `Sources/CacheMounts.swift`: per-toolchain build-cache host paths, scope, guest paths, and directory creation
 - `Sources/WorkspaceIdentity.swift`: the slug-plus-path-hash key shared by workspace-image names and workspace-scoped caches
