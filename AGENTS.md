@@ -160,6 +160,44 @@ Favor pure-function tests when possible:
 - doctor reporting and JSON rendering
 - workspace-image cache decisions
 
+### Prove a test can fail
+
+A test that cannot fail is worse than no test: it reports coverage that does not
+exist, and it is what a reviewer will trust instead of reading the code.
+
+**Before claiming a test covers something, break the implementation and watch the
+test go red. Then restore it and watch it go green.** Report both. This is the
+only check that has reliably caught the failure below; reading a test and
+agreeing with it has not.
+
+Every one of these shipped green against a broken implementation, and every one
+was found by mutating the code rather than by reviewing the test:
+
+- an assertion on a bare substring that also appeared in a nearby comment, so
+  deleting the real flag from the `RUN` line still passed — anchor on the actual
+  invocation (`sh -s -- -y --no-modify-path`), not the flag alone
+- a smoke check comparing `find -type f | wc -l` counts instead of listings, so a
+  compatibility symlink or a directory-only change went through
+- two shell helpers running `grep -Eq "$pattern"` where the pattern began with
+  `--volume`; grep parsed it as an option and exited 2, making negative
+  assertions vacuous and positive ones hard-fail. Always `grep -Eq -- "$pattern"`
+- `expect … | head -1 && echo PRESENT` — a pipeline's status is the last
+  command's, and `head` succeeds on empty input, so the check always passed
+- a readiness test using mode `0o500` to cover a `writable && traversable`
+  guard; `0o500` is already non-writable, so the traversability half was never
+  exercised. Pick the mode that isolates the clause (`0o200`)
+- a launch-boundary test that covered two halves of a composition individually
+  while nothing covered the code joining them, so a run could report one cache
+  scope and mount another
+
+Recurring shapes worth suspecting: an assertion whose string also occurs in a
+comment or a doc block; a count where the identity matters; a negative assertion
+with no paired positive proving the subject was present at all; and a value
+threaded through a function that no test calls with a wrong value.
+
+`doctor --json` escapes `/` as `\/`; unescape before matching host paths in
+`scripts/smoke.sh` or the assertion silently matches nothing.
+
 ## Module Map
 
 Key files:
