@@ -53,6 +53,7 @@ Current front-door UX:
 - `spawn --shell` opens a shell
 - `spawn doctor` checks the local environment and workspace resolution
 - `spawn doctor --json` emits the same information in machine-readable form
+- `spawn cache clean --native` resets the current experimental native cache when no native launch is active
 
 Important runtime controls:
 
@@ -139,6 +140,7 @@ Build caches are host directories under `<state>/caches/<scope-key>/<cache>`, bi
 - Workspace launches cross `ContainerRuntime` as a `ResolvedLaunchPlan`; CLI arguments and process details stay in runtime adapters
 - Raw operational `container` CLI commands remain in `ContainerRunner` and are intentionally outside `ContainerRuntime`
 - `NativeContainerRuntime` owns its image/initfs/rootfs cache under `<state>/native-runtime/containerization-<version>`; versioning prevents reuse of a stale initfs after a library upgrade, and it never mutates the CLI service's image store directly
+- A native launch holds a shared lifecycle lock until its VM and launch clone are gone; `spawn cache clean --native` takes that lock exclusively, moves the current cache out of the live path, then removes it. Older cache layouts are reported but never removed automatically
 - `make build` signs the release binary with `spawn.entitlements`; direct Virtualization use requires `com.apple.security.virtualization`
 - `RunCommand` resolves one `ResolvedLaunchPlan`; runtime adapters consume it without re-reading CLI or workspace config
 - `AppleContainerCLIRuntime.buildArgs(for:)` is pure and heavily tested
@@ -196,6 +198,7 @@ Key files:
 - `Sources/ContainerRuntime.swift`: semantic workspace-launch boundary
 - `Sources/AppleContainerCLIRuntime.swift`: `container run` adapter and execution behavior
 - `Sources/NativeContainerRuntime.swift`: experimental Containerization adapter and spawn-owned artifacts
+- `Sources/NativeCacheStore.swift`: native cache inspection, lifecycle lock, and current-version cleanup
 - `Sources/ContainerRunner.swift`: `container` CLI discovery, preflight, and raw operational commands
 - `Sources/BuildCommand.swift`: spawn-managed image builds
 - `Sources/CacheMounts.swift`: per-toolchain build-cache host paths, scope, guest paths, and directory creation

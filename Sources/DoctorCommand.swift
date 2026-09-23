@@ -68,6 +68,7 @@ extension Spawn {
         struct Report: Codable, Sendable, Equatable {
             let checks: [CheckReport]
             let workspace: WorkspaceReport
+            let nativeCache: NativeCacheStore.Snapshot?
         }
 
         static let configuration = CommandConfiguration(
@@ -85,6 +86,7 @@ extension Spawn {
                   default kernel and Rosetta readiness
                   spawn-managed images
                   env file and persisted agent state
+                  native backend cache location and allocated size
                   workspace detection, defaults, and runtime cache status
 
                 JSON output adds:
@@ -92,6 +94,7 @@ extension Spawn {
                   workspace              Structured workspace result
                   workspace.defaults     Configured workspace values from .spawn.toml
                   workspace.runtime      Workspace-image cache state and tracked paths
+                  nativeCache            Native artifact paths and allocated bytes
                 """
         )
 
@@ -412,7 +415,8 @@ extension Spawn {
 
         private static func report(
             checks: [Check],
-            workspace: WorkspaceReport
+            workspace: WorkspaceReport,
+            nativeCache: NativeCacheStore.Snapshot?
         ) -> Report {
             Report(
                 checks: checks.map { check in
@@ -422,8 +426,64 @@ extension Spawn {
                         detail: check.detail
                     )
                 },
-                workspace: workspace
+                workspace: workspace,
+                nativeCache: nativeCache
             )
+        }
+
+        static func nativeCacheCheck(
+            stateDir: URL = Paths.stateDir
+        ) -> (check: Check, snapshot: NativeCacheStore.Snapshot?) {
+            let store = NativeCacheStore(
+                stateRoot: stateDir.appendingPathComponent("native-runtime")
+            )
+            do {
+                let snapshot = try store.snapshot()
+                guard !snapshot.entries.isEmpty else {
+                    return (
+                        Check(
+                            status: .ok,
+                            title: "Native cache",
+                            detail: "none yet at \(snapshot.path)"
+                        ),
+                        snapshot
+                    )
+                }
+
+                let descriptions = snapshot.entries.map { entry in
+                    let formatted = ByteCountFormatter.string(
+                        fromByteCount: Int64(clamping: entry.allocatedBytes),
+                        countStyle: .file
+                    )
+                    let qualifier: String
+                    if entry.isCurrent {
+                        qualifier = "current"
+                    } else if entry.isPendingDeletion {
+                        qualifier = "interrupted cleanup; retry 'spawn cache clean --native'"
+                    } else {
+                        qualifier = "older; manual cleanup"
+                    }
+                    return "\(entry.path) (about \(formatted) allocated, \(qualifier))"
+                }
+                return (
+                    Check(
+                        status: .ok,
+                        title: "Native cache",
+                        detail: descriptions.joined(separator: ", ")
+                            + ". Use 'spawn cache clean --native' to reclaim the current version."
+                    ),
+                    snapshot
+                )
+            } catch {
+                return (
+                    Check(
+                        status: .warning,
+                        title: "Native cache",
+                        detail: "Unable to inspect native cache at \(store.stateRoot.path): \(error)"
+                    ),
+                    nil
+                )
+            }
         }
 
         static func renderJSON(_ report: Report) throws -> String {
@@ -779,6 +839,8 @@ extension Spawn {
                     toolchain: cacheToolchain,
                     workspaceConfig: workspaceConfig
                 ))
+            let nativeCache = Self.nativeCacheCheck()
+            checks.append(nativeCache.check)
             checks.append(contentsOf: Self.stateChecks())
 
             let workspaceReport = Self.workspaceReport(
@@ -788,7 +850,15 @@ extension Spawn {
             )
 
             if json {
-                Swift.print(try Self.renderJSON(Self.report(checks: checks, workspace: workspaceReport)))
+                Swift.print(
+                    try Self.renderJSON(
+                        Self.report(
+                            checks: checks,
+                            workspace: workspaceReport,
+                            nativeCache: nativeCache.snapshot
+                        )
+                    )
+                )
                 return
             }
 

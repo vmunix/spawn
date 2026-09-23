@@ -154,6 +154,10 @@ export XDG_STATE_HOME="${SMOKE_TEMP_ROOT}/state"
 CACHE_PROBE_DIR="${SMOKE_TEMP_ROOT}/cache-probe"
 mkdir -p "${CACHE_PROBE_DIR}"
 cleanup_smoke() {
+  if [[ -n "${NATIVE_BUSY_PID:-}" ]]; then
+    kill "${NATIVE_BUSY_PID}" 2>/dev/null || true
+    wait "${NATIVE_BUSY_PID}" 2>/dev/null || true
+  fi
   rm -rf -- "${SMOKE_TEMP_ROOT}"
 }
 trap cleanup_smoke EXIT
@@ -181,6 +185,41 @@ native_containers="${XDG_STATE_HOME}/spawn/native-runtime/containerization-0.45.
 native_children="$(find "${native_containers}" -mindepth 1 -maxdepth 1 -print)" \
   || fail "could not inspect native launch cleanup"
 [[ -z "${native_children}" ]] || fail "native launch left container artifacts behind: ${native_children}"
+
+run_and_capture "Doctor reports native artifact state" "${SPAWN_BIN}" doctor --json
+REPLY="$(unescape_json_slashes "${REPLY}")"
+expect_regex "${REPLY}" '"nativeCache"[[:space:]]*:' "native doctor JSON payload"
+expect_regex "${REPLY}" '"isCurrent"[[:space:]]*:[[:space:]]*true' "native doctor current cache"
+native_version_root="${XDG_STATE_HOME}/spawn/native-runtime/containerization-0.45.0"
+expect_contains "${REPLY}" "${native_version_root}" "native doctor cache path"
+run_and_capture "Doctor human output reports native artifact state" "${SPAWN_BIN}" doctor
+expect_contains "${REPLY}" "Native cache" "native doctor human check"
+expect_contains "${REPLY}" "${native_version_root}" "native doctor human cache path"
+
+# A running native VM must keep its launch clone until it exits. Cleanup takes
+# an exclusive lifecycle lock and refuses to remove that clone underneath it.
+section "Native cache clean refuses an active launch"
+native_busy_output="${SMOKE_TEMP_ROOT}/native-busy.log"
+"${SPAWN_BIN}" -C "${ROOT}/fixtures/cpp-sample" --runtime spawn --toolchain base \
+  --backend native-experimental -- /bin/bash -lc 'echo NATIVE_BUSY; sleep 10' \
+  >"${native_busy_output}" 2>&1 &
+NATIVE_BUSY_PID=$!
+for _ in {1..100}; do
+  if grep -q -- '^NATIVE_BUSY$' "${native_busy_output}"; then break; fi
+  kill -0 "${NATIVE_BUSY_PID}" 2>/dev/null || fail "native busy launch exited before cleanup check"
+  sleep 0.1
+done
+grep -q -- '^NATIVE_BUSY$' "${native_busy_output}" || fail "native busy launch never reached its workload"
+if native_clean_busy="$("${SPAWN_BIN}" cache clean --native --dry-run 2>&1)"; then
+  fail "native cache clean dry-run acquired an exclusive lease while a native VM was active"
+fi
+expect_contains "${native_clean_busy}" "in use by an active launch" "native cleanup lock"
+[[ -d "${native_version_root}" ]] || fail "native cleanup removed an active VM's artifacts"
+wait "${NATIVE_BUSY_PID}" || fail "native busy launch failed"
+NATIVE_BUSY_PID=""
+
+run_and_capture "Native cache clean reclaims the current version" "${SPAWN_BIN}" cache clean --native
+[[ ! -e "${native_version_root}" ]] || fail "native cache clean left the current version behind"
 
 run_and_capture "Doctor JSON reports workspace defaults" "${SPAWN_BIN}" doctor "${ROOT}/fixtures/rust-sample" --json
 REPLY="$(unescape_json_slashes "${REPLY}")"

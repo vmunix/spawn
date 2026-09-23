@@ -159,6 +159,11 @@ Runtime mode controls how spawn reacts when a workspace defines its own runtime:
 `workspace-image` reuses a cached workspace image when the tracked Dockerfile, optional `.dockerignore`, devcontainer config, and non-ignored build-context file contents and permissions have not changed.
 Use `--rebuild-workspace-image` with `--runtime workspace-image` when you want to bypass the cache explicitly.
 
+`spawn doctor` reports the experimental native backend's artifact paths and
+approximate allocated size. `spawn cache clean --native` removes only the
+current native backend cache after active native launches exit; the next launch
+rebuilds it. Workspace build caches and older native cache layouts are untouched.
+
 Launch backend is separate from runtime mode. `--backend cli` preserves the
 existing `container run` path. `--backend native-experimental` launches new
 workspace containers through the Containerization library, including

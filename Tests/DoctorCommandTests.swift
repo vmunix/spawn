@@ -572,6 +572,18 @@ private func namesPath(_ detail: String, _ path: String) -> Bool {
                 configPath: nil,
                 cacheRecordPath: "/tmp/cache.json"
             )
+        ),
+        nativeCache: NativeCacheStore.Snapshot(
+            path: "/state/native-runtime",
+            entries: [
+                NativeCacheStore.Entry(
+                    name: "containerization-0.45.0",
+                    path: "/state/native-runtime/containerization-0.45.0",
+                    allocatedBytes: 4096,
+                    isCurrent: true,
+                    isPendingDeletion: false
+                )
+            ]
         )
     )
 
@@ -581,12 +593,38 @@ private func namesPath(_ detail: String, _ path: String) -> Bool {
     let workspace = try #require(object["workspace"] as? [String: Any])
     let runtime = try #require(workspace["runtime"] as? [String: Any])
     let checks = try #require(object["checks"] as? [[String: Any]])
+    let nativeCache = try #require(object["nativeCache"] as? [String: Any])
+    let nativeEntries = try #require(nativeCache["entries"] as? [[String: Any]])
 
     #expect(workspace["source"] as? String == "dockerfile")
     #expect(runtime["cacheStatus"] as? String == "stale")
     #expect(runtime["cacheReason"] as? String == "build inputs changed")
     #expect(runtime["dockerignorePath"] as? String == "/tmp/project/.dockerignore")
     #expect(checks.first?["status"] as? String == "ok")
+    #expect(nativeEntries.first?["allocatedBytes"] as? Int == 4096)
+    #expect(nativeCache["allocatedBytes"] as? Int == 4096)
+}
+
+@Test func doctorReportsNativeCacheWithoutCreatingIt() throws {
+    let stateDir = try makeTempDir(files: [:])
+    let root = stateDir.appendingPathComponent("native-runtime")
+
+    let missing = Spawn.Doctor.nativeCacheCheck(stateDir: stateDir)
+    #expect(missing.check.status == .ok)
+    #expect(missing.snapshot?.entries.isEmpty == true)
+    #expect(!FileManager.default.fileExists(atPath: root.path))
+
+    let store = NativeCacheStore(stateRoot: root)
+    try FileManager.default.createDirectory(at: store.currentRoot, withIntermediateDirectories: true)
+    try Data(repeating: 42, count: 4096).write(
+        to: store.currentRoot.appendingPathComponent("content")
+    )
+    let present = Spawn.Doctor.nativeCacheCheck(stateDir: stateDir)
+    #expect(present.check.status == .ok)
+    #expect(present.check.detail.contains(store.currentRoot.path))
+    #expect(present.check.detail.contains("spawn cache clean --native"))
+    #expect(present.snapshot?.entries.first?.isCurrent == true)
+    #expect((present.snapshot?.allocatedBytes ?? 0) > 0)
 }
 
 private func writeCacheRecord(for plan: WorkspaceImageRuntime.Plan) throws {

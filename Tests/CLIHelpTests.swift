@@ -12,6 +12,7 @@ import Testing
     #expect(help.contains("Runtime selection:"))
     #expect(help.contains("--runtime workspace-image"))
     #expect(help.contains("--backend native-experimental"))
+    #expect(help.contains("spawn cache clean --native"))
     #expect(help.contains("Workspace defaults:"))
     #expect(help.contains(".spawn.toml [workspace]   Default agent; access and cache sharing require flags"))
     // Every run option a user is likely to reach for must be discoverable from
@@ -53,7 +54,16 @@ import Testing
     #expect(help.contains("default kernel and Rosetta readiness"))
     #expect(help.contains("workspace.defaults"))
     #expect(help.contains("workspace.runtime"))
+    #expect(help.contains("nativeCache"))
     #expect(help.contains("-C, --cwd"))
+}
+
+@Test func cacheHelpExplainsExplicitNativeCleanupScope() {
+    let help = Spawn.helpMessage(for: Spawn.Cache.Clean.self, columns: 100)
+    #expect(help.contains("spawn cache clean --native"))
+    #expect(help.contains("--dry-run"))
+    #expect(help.contains("older native cache"))
+    #expect(help.contains("while a native launch is active"))
 }
 
 @Test func imageAndBuildHelpExplainManagedImageScope() {

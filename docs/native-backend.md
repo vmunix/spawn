@@ -30,7 +30,7 @@ Its state root and temporary OCI export staging directory are user-only (mode
 `0700`) because local image layers may contain private source or credentials.
 Artifacts live under a Containerization-versioned directory because the
 library reuses `initfs.ext4` without checking whether its reference changed.
-Older caches remain available for explicit cleanup after an upgrade.
+Older caches remain available for manual cleanup after an upgrade.
 
 | Artifact | Source | Native ownership and lifetime |
 |----------|--------|-------------------------------|
@@ -45,6 +45,17 @@ Older caches remain available for explicit cleanup after an upgrade.
 A cross-process lock serializes mutations to the spawn-owned OCI, initfs, and
 rootfs caches. It is released before the VM runs. Workspace build caches remain
 ordinary bind-mounted directories and are not covered by this lock.
+
+`spawn doctor` reports the native cache's paths and approximate allocated bytes
+without creating state. `spawn cache clean --native` resets the current version's
+cache, including image, initfs, and rootfs artifacts. It refuses cleanup while
+a native launch is active. An interrupted removal is moved out of the live
+cache path first; a later clean retries it. Older unversioned test caches and
+other versions are listed by doctor but not removed by this command, because
+their older launch processes do not participate in the current lifecycle lock.
+Stop those processes before removing their directories manually.
+Use `spawn cache clean --native --dry-run` to check the lock and estimated
+reclaimable size without removing artifacts.
 
 ## API map
 
@@ -77,14 +88,10 @@ or VM networking choices above. Those are adapter implementation details.
   `make build` and `make install` ad-hoc sign the release binary with the
   checked-in `spawn.entitlements`; an unsigned `swift run spawn` build cannot
   launch this backend.
-- Native artifacts have no garbage-collection command yet. This is the first
-  follow-up before expanding native support: cached image and rootfs layers
-  can occupy gigabytes, so reclamation and `spawn doctor` visibility should
-  arrive together.
+- Cleanup is a whole-current-version reset, not selective per-image garbage
+  collection. It preserves workspace build caches and older native layouts.
 - Retained native containers are unsupported. A plan that requests one fails
   before artifact work begins.
-- Native state is not yet included in `spawn doctor`; doctor remains a CLI
-  readiness and workspace-resolution surface in this slice.
 - Containerization 0.45.0's `AsyncSignalHandler.cancel()` recursively enters
   its own mutex through the stream termination callback. The adapter uses host
   dispatch signal sources until that upstream helper is safe to cancel.

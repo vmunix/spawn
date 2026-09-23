@@ -122,6 +122,8 @@ PATH lookup. Override it with `CONTAINER_PATH`.
 
 The native artifact boundary and current limitations are detailed in
 [Native Containerization Backend](native-backend.md).
+Doctor reports its approximate allocated size; `spawn cache clean --native`
+reclaims the current version when no native launch holds a lifecycle lease.
 
 ### TTY via execv
 

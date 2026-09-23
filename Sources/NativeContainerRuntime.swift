@@ -28,17 +28,16 @@ struct NativeContainerRuntime: ContainerRuntime {
     @discardableResult
     func prepareArtifactRoot() throws -> URL {
         let fileManager = FileManager.default
-        for directory in [stateRoot, artifactRoot] {
-            try fileManager.createDirectory(
-                at: directory,
-                withIntermediateDirectories: true,
-                attributes: [.posixPermissions: 0o700]
-            )
-            try fileManager.setAttributes(
-                [.posixPermissions: 0o700],
-                ofItemAtPath: directory.path
-            )
-        }
+        try NativeCacheStore(stateRoot: stateRoot).prepareRoot()
+        try fileManager.createDirectory(
+            at: artifactRoot,
+            withIntermediateDirectories: true,
+            attributes: [.posixPermissions: 0o700]
+        )
+        try fileManager.setAttributes(
+            [.posixPermissions: 0o700],
+            ofItemAtPath: artifactRoot.path
+        )
         return artifactRoot
     }
 
@@ -68,6 +67,11 @@ struct NativeContainerRuntime: ContainerRuntime {
                 "The native-experimental backend requires a binary signed with the com.apple.security.virtualization entitlement. Build it with 'make build' or 'make install'."
             )
         }
+
+        // Hold this across preparation, VM execution, and clone deletion. The
+        // explicit cache-clean command takes the same lock exclusively.
+        let cacheLease = try NativeCacheStore(stateRoot: stateRoot).acquireLaunchLease()
+        defer { _ = cacheLease }
 
         let terminal = try launch.allocateTerminal ? Terminal.current : nil
         let id = Self.containerID()
@@ -124,8 +128,9 @@ struct NativeContainerRuntime: ContainerRuntime {
         // Image import, initfs materialization, and rootfs cache creation all
         // mutate the spawn-owned native store. Serialize them across processes;
         // running VMs use independent cloned root filesystems after this scope.
-        let artifactLock = try NativeArtifactLock(
-            path: artifactRoot.appendingPathComponent("artifacts.lock")
+        let artifactLock = try NativeCacheFileLock(
+            path: artifactRoot.appendingPathComponent("artifacts.lock"),
+            operation: LOCK_EX
         )
         defer { _ = artifactLock }
 
@@ -511,32 +516,6 @@ private struct NativeImageBridge {
             )
         }
         return image
-    }
-}
-
-private final class NativeArtifactLock {
-    private let descriptor: Int32
-
-    init(path: URL) throws {
-        let descriptor = open(path.path, O_CREAT | O_RDWR, 0o600)
-        guard descriptor >= 0 else {
-            throw SpawnError.runtimeError(
-                "Cannot open native artifact lock at \(path.path): \(String(cString: strerror(errno)))"
-            )
-        }
-        guard flock(descriptor, LOCK_EX) == 0 else {
-            let message = String(cString: strerror(errno))
-            close(descriptor)
-            throw SpawnError.runtimeError(
-                "Cannot lock native artifact cache at \(path.path): \(message)"
-            )
-        }
-        self.descriptor = descriptor
-    }
-
-    deinit {
-        _ = flock(descriptor, LOCK_UN)
-        close(descriptor)
     }
 }
 
