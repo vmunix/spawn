@@ -39,7 +39,10 @@ Always run `make test` before `git commit` or `git push`.
 
 ## Product Shape
 
-`spawn` is a Swift CLI that wraps Apple's `container` CLI to run coding agents and arbitrary commands in macOS-hosted Linux containers.
+`spawn` is a Swift CLI that runs coding agents and arbitrary commands in
+macOS-hosted Linux containers. Apple's `container` CLI is the stable launch
+backend; direct Containerization-library launches are experimental and
+explicitly selected.
 
 Current front-door UX:
 
@@ -55,6 +58,7 @@ Important runtime controls:
 
 - `--access minimal|git|trusted`
 - `--runtime auto|spawn|workspace-image`
+- `--backend cli|native-experimental` (`cli` is the default)
 - `--rebuild-workspace-image` only with `--runtime workspace-image`
 - `.spawn.toml` may define `[workspace] agent/access` and `[toolchain] base`
 
@@ -74,7 +78,8 @@ RunCommand.run()
   → EnvLoader.load/loadDefault()         # env file / defaults
   → ResolvedLaunchPlan.workspace()       # one backend-neutral launch value
   → ContainerRuntime.launch(plan)        # semantic launch boundary
-    → AppleContainerCLIRuntime            # execv for TTY, Process otherwise
+    → AppleContainerCLIRuntime            # default: execv for TTY, Process otherwise
+    or NativeContainerRuntime                # explicit experimental library backend
 ```
 
 Toolchain detection priority:
@@ -133,6 +138,8 @@ Build caches are host directories under `<state>/caches/<scope-key>/<cache>`, bi
 
 - Workspace launches cross `ContainerRuntime` as a `ResolvedLaunchPlan`; CLI arguments and process details stay in runtime adapters
 - Raw operational `container` CLI commands remain in `ContainerRunner` and are intentionally outside `ContainerRuntime`
+- `NativeContainerRuntime` owns its image/initfs/rootfs cache under `<state>/native-runtime/containerization-<version>`; versioning prevents reuse of a stale initfs after a library upgrade, and it never mutates the CLI service's image store directly
+- `make build` signs the release binary with `spawn.entitlements`; direct Virtualization use requires `com.apple.security.virtualization`
 - `RunCommand` resolves one `ResolvedLaunchPlan`; runtime adapters consume it without re-reading CLI or workspace config
 - `AppleContainerCLIRuntime.buildArgs(for:)` is pure and heavily tested
 - Interactive TTY runs use `execv`; non-TTY runs use `Foundation.Process`
@@ -152,7 +159,7 @@ Tests use Swift 6's `Testing` framework, not XCTest.
 - Use `@Test` and `#expect`
 - `Tests/TestHelpers.swift` provides `makeTempDir(files:)`
 - `make test` prefers Xcode when available because CLT Swift can be incomplete for this setup
-- `make smoke` exercises the front-door CLI across the fixture workspaces under `fixtures/`, including `doctor --json` and workspace-image runtimes
+- `make smoke` exercises the front-door CLI across the fixture workspaces under `fixtures/`, including one native library launch, `doctor --json`, and workspace-image runtimes
 
 Favor pure-function tests when possible:
 
@@ -188,6 +195,7 @@ Key files:
 - `Sources/ResolvedLaunchPlan.swift`: backend-neutral final image, mounts, environment, command, and resources
 - `Sources/ContainerRuntime.swift`: semantic workspace-launch boundary
 - `Sources/AppleContainerCLIRuntime.swift`: `container run` adapter and execution behavior
+- `Sources/NativeContainerRuntime.swift`: experimental Containerization adapter and spawn-owned artifacts
 - `Sources/ContainerRunner.swift`: `container` CLI discovery, preflight, and raw operational commands
 - `Sources/BuildCommand.swift`: spawn-managed image builds
 - `Sources/CacheMounts.swift`: per-toolchain build-cache host paths, scope, guest paths, and directory creation

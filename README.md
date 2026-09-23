@@ -31,7 +31,10 @@ being limited to a shell wrapper forever.
 
 ## What it does
 
-`spawn` wraps Apple's [`container`](https://github.com/apple/containerization) CLI to launch AI coding agents in lightweight Linux VMs.
+`spawn` launches AI coding agents in lightweight Linux VMs. Apple's
+[`container`](https://github.com/apple/containerization) CLI is the stable
+default backend; an explicit experimental backend exercises Apple's
+Containerization library directly.
 
 - **Auto-detects toolchains** — Rust, Go, C++, and JS/TS projects (Node, Bun, Deno), or falls back to a base image
 - **Safe mode by default** — prompts before `git push`, PR creation, and other remote-write operations
@@ -121,6 +124,7 @@ Use `spawn -- <command...>` for passthrough commands. `spawn cargo test` is reje
 | `--shell` | Drop into a shell instead of running an agent |
 | `-C, --cwd <dir>` | Directory to mount as workspace (default: current directory) |
 | `--runtime <name>` | Runtime mode: `auto`, `spawn`, `workspace-image` |
+| `--backend <name>` | Launch backend: `cli` (default), `native-experimental` |
 | `--rebuild-workspace-image` | Force a rebuild when using `--runtime workspace-image` |
 | `--access <name>` | Host access profile: `minimal`, `git`, `trusted` |
 | `--toolchain <name>` | Override auto-detected toolchain: `base`, `cpp`, `rust`, `go`, `js` |
@@ -154,6 +158,15 @@ Runtime mode controls how spawn reacts when a workspace defines its own runtime:
 
 `workspace-image` reuses a cached workspace image when the tracked Dockerfile, optional `.dockerignore`, devcontainer config, and non-ignored build-context file contents and permissions have not changed.
 Use `--rebuild-workspace-image` with `--runtime workspace-image` when you want to bypass the cache explicitly.
+
+Launch backend is separate from runtime mode. `--backend cli` preserves the
+existing `container run` path. `--backend native-experimental` launches new
+workspace containers through the Containerization library, including
+`spawn --shell`; it never silently falls back to the CLI. Existing-container
+operations (`spawn exec`, `spawn shell <id>`, `spawn list`, and `spawn stop`),
+image builds, and doctor probes remain CLI-backed. See
+[Native Containerization Backend](docs/native-backend.md) for its artifact
+ownership, limitations, and cleanup model.
 
 If your repo has a root `Dockerfile` / `Containerfile`, or a `.devcontainer/devcontainer.json` with `build.dockerfile`, spawn currently requires an explicit choice:
 

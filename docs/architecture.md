@@ -16,6 +16,7 @@ spawn follows the [XDG Base Directory Specification](https://specifications.free
 | `~/.local/state/spawn/git/` | Copied git config for `git`/`trusted` access profiles |
 | `~/.local/state/spawn/ssh/` | Copied SSH keys for the `trusted` access profile |
 | `~/.local/state/spawn/gh/` | Copied gh CLI config for `git`/`trusted` access profiles |
+| `~/.local/state/spawn/native-runtime/containerization-<version>/` | Experimental native backend image, initfs, and rootfs artifacts |
 
 These paths respect `XDG_CONFIG_HOME` and `XDG_STATE_HOME` environment variables. For example, if `XDG_STATE_HOME` is set to `/custom/state`, spawn stores state at `/custom/state/spawn/` instead of `~/.local/state/spawn/`.
 
@@ -97,19 +98,37 @@ RunCommand.run()
                                   # Freeze final backend-neutral launch inputs
     → RunLaunchSummary.cacheNotices()
                                   # Warn about exactly the scope just mounted
-  → ContainerRunner.run(launch.plan)
-                                  # Render and launch with Apple's CLI
+  → ContainerRuntimeFactory.makeRuntime(--backend)
+    → AppleContainerCLIRuntime     # Default: render argv and launch with Apple's CLI
+    or NativeContainerRuntime      # Experimental: launch with Containerization APIs
+  → ContainerRuntime.launch(launch.plan)
 ```
 
 ## Design decisions
 
-### Apple's container CLI
+### Launch backends
 
-All container interaction goes through Apple's [`container`](https://github.com/apple/containerization) CLI, auto-detected at `/opt/homebrew/bin/container` or `/usr/local/bin/container`, falling back to PATH lookup. Override with the `CONTAINER_PATH` environment variable.
+Workspace launches cross the semantic `ContainerRuntime` boundary as one
+backend-neutral `ResolvedLaunchPlan`. The default `AppleContainerCLIRuntime`
+renders that plan as `container run`. `NativeContainerRuntime` is selected only
+with `--backend native-experimental` and consumes the same plan through Apple's
+Containerization APIs. Kernel, initfs, rootfs, and VM network details remain
+private to the native adapter.
+
+Build, image, list, stop, doctor, and existing-container exec/shell operations
+remain raw CLI operations in `ContainerRunner`. The CLI is auto-detected at
+`/opt/homebrew/bin/container` or `/usr/local/bin/container`, falling back to
+PATH lookup. Override it with `CONTAINER_PATH`.
+
+The native artifact boundary and current limitations are detailed in
+[Native Containerization Backend](native-backend.md).
 
 ### TTY via execv
 
-When stdin is a real terminal, spawn uses `execv` to replace its process with `container`, giving the container CLI direct TTY access. This is required for interactive I/O. When stdin is a pipe, it falls back to `Foundation.Process` with signal forwarding.
+On the CLI backend, a real terminal uses `execv` to replace spawn with
+`container`; piped input uses `Foundation.Process` with signal forwarding. The
+native backend instead hands the current terminal to Containerization, forwards
+resize and termination signals, and waits for the VM workload to exit.
 
 ### VirtioFS workaround
 

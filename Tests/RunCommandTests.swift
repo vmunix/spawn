@@ -344,7 +344,7 @@ private final class RecordingContainerRuntime: ContainerRuntime, @unchecked Send
         self.status = status
     }
 
-    func launch(_ plan: ResolvedLaunchPlan) throws -> Int32 {
+    func launch(_ plan: ResolvedLaunchPlan) async throws -> Int32 {
         lock.withLock {
             recordedPlans.append(plan)
         }
@@ -353,6 +353,36 @@ private final class RecordingContainerRuntime: ContainerRuntime, @unchecked Send
 
     var plans: [ResolvedLaunchPlan] {
         lock.withLock { recordedPlans }
+    }
+}
+
+private final class RecordingContainerRuntimeFactory: ContainerRuntimeFactory, @unchecked Sendable {
+    private let lock = NSLock()
+    private var recordedBackends: [ContainerBackend] = []
+    private var recordedStateDirectories: [URL] = []
+    let runtime: RecordingContainerRuntime
+
+    init(runtime: RecordingContainerRuntime = RecordingContainerRuntime()) {
+        self.runtime = runtime
+    }
+
+    func makeRuntime(
+        for backend: ContainerBackend,
+        stateDir: URL
+    ) throws -> any ContainerRuntime {
+        lock.withLock {
+            recordedBackends.append(backend)
+            recordedStateDirectories.append(stateDir)
+        }
+        return runtime
+    }
+
+    var backends: [ContainerBackend] {
+        lock.withLock { recordedBackends }
+    }
+
+    var stateDirectories: [URL] {
+        lock.withLock { recordedStateDirectories }
     }
 }
 
@@ -521,7 +551,54 @@ private final class RecordingContainerRuntime: ContainerRuntime, @unchecked Send
     #expect(plan.removeOnExit)
 }
 
-@Test func runCommandHandsItsExactResolvedPlanToTheInjectedRuntime() throws {
+@Test func parsedBackendSelectsTheRuntimeFactoryUsedForTheLaunch() async throws {
+    for (arguments, expectedBackend) in [
+        ([], ContainerBackend.cli),
+        (["--backend", "native-experimental"], ContainerBackend.nativeExperimental),
+    ] {
+        let workspace = try makeTempDir(files: [:])
+        let imageStore = try makeTempDir(files: ["state.json": #"{"spawn-base:latest":{}}"#])
+        let stateDir = try makeTempDir(files: [:])
+        var run = try parsedRun(
+            arguments + [
+                "--agent",
+                "codex",
+                "-C",
+                workspace.path,
+                "--image",
+                "spawn-base:latest",
+                "--",
+                "/usr/bin/true",
+            ]
+        )
+        let factory = RecordingContainerRuntimeFactory()
+
+        try await run.run(
+            using: factory,
+            imageStoreRoot: imageStore,
+            stateDir: stateDir
+        )
+
+        #expect(factory.backends == [expectedBackend])
+        #expect(factory.stateDirectories == [stateDir])
+        #expect(factory.runtime.plans.count == 1)
+    }
+}
+
+@Test func productionRuntimeFactoryMapsBothBackendCasesExactly() throws {
+    let stateDir = URL(fileURLWithPath: "/state/spawn")
+    let factory = ProductionContainerRuntimeFactory()
+
+    #expect(try factory.makeRuntime(for: .cli, stateDir: stateDir) is AppleContainerCLIRuntime)
+    #expect(
+        try factory.makeRuntime(
+            for: .nativeExperimental,
+            stateDir: stateDir
+        ) is NativeContainerRuntime
+    )
+}
+
+@Test func runCommandHandsItsExactResolvedPlanToTheInjectedRuntime() async throws {
     let run = try parsedRun([])
     let runtime = RecordingContainerRuntime()
     let plan = makeLaunchPlan(
@@ -538,12 +615,12 @@ private final class RecordingContainerRuntime: ContainerRuntime, @unchecked Send
     )
     let launch = ResolvedLaunch(plan: plan, cacheNotices: ["not runtime input"])
 
-    try run.executeLaunch(launch, using: runtime)
+    try await run.executeLaunch(launch, using: runtime)
 
     #expect(runtime.plans == [plan])
 }
 
-@Test func runCommandPreservesRuntimeExitStatus() throws {
+@Test func runCommandPreservesRuntimeExitStatus() async throws {
     let run = try parsedRun([])
     let runtime = RecordingContainerRuntime(status: 37)
     let launch = ResolvedLaunch(
@@ -559,8 +636,8 @@ private final class RecordingContainerRuntime: ContainerRuntime, @unchecked Send
         cacheNotices: []
     )
 
-    #expect(throws: ExitCode(37)) {
-        try run.executeLaunch(launch, using: runtime)
+    await #expect(throws: ExitCode(37)) {
+        try await run.executeLaunch(launch, using: runtime)
     }
     #expect(runtime.plans == [launch.plan])
 }

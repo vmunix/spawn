@@ -52,6 +52,18 @@ import Testing
     #expect(parsed.shell == true)
 }
 
+@Test func runParserDefaultsToCliAndAcceptsExperimentalNativeBackend() throws {
+    let defaultCommand = try Spawn.Run.parseAsRoot([])
+    let defaultRun = try #require(defaultCommand as? Spawn.Run)
+    #expect(defaultRun.backend == "cli")
+
+    let nativeCommand = try Spawn.Run.parseAsRoot([
+        "--backend", "native-experimental",
+    ])
+    let nativeRun = try #require(nativeCommand as? Spawn.Run)
+    #expect(nativeRun.backend == "native-experimental")
+}
+
 @Test func rootRoutingDefaultsToRunCommand() throws {
     let command = try Spawn.parseAsRoot(Spawn.rewrittenArguments([]))
     #expect(command is Spawn.Run)

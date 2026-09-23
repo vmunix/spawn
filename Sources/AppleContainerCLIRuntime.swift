@@ -40,7 +40,7 @@ struct AppleContainerCLIRuntime: ContainerRuntime {
 
     /// Preserve direct terminal ownership for interactive launches and signal
     /// forwarding for child-process launches.
-    func launch(_ plan: ResolvedLaunchPlan) throws -> Int32 {
+    func launch(_ plan: ResolvedLaunchPlan) async throws -> Int32 {
         try ContainerRunner.preflight()
         let binary = try ContainerRunner.resolvedContainerPath()
         let args = Self.buildArgs(for: plan)

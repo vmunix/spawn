@@ -167,6 +167,21 @@ expect_contains "${REPLY}" "spawn-go" "spawn image list"
 expect_contains "${REPLY}" "spawn-cpp" "spawn image list"
 expect_contains "${REPLY}" "spawn-js" "spawn image list"
 
+# The native adapter's library configuration is applied inside
+# ContainerManager.create. This launch checks that the real handoff reaches the
+# VM: removing the call that applies the plan must fail here, even if the pure
+# adapter tests still pass.
+run_and_capture "Native backend: launch plan reaches the VM" \
+  "${SPAWN_BIN}" -C "${ROOT}/fixtures/cpp-sample" --runtime spawn --toolchain base \
+  --backend native-experimental --env SPAWN_NATIVE_SMOKE=ready -- /bin/bash -lc \
+  'set -e; test "$PWD" = /workspace/cpp-sample; test -f CMakeLists.txt; test "$SPAWN_NATIVE_SMOKE" = ready; test "$(id -u)" = 1001; echo "PASS: native launch plan"'
+expect_contains "${REPLY}" "PASS: native launch plan" "native launch plan"
+native_containers="${XDG_STATE_HOME}/spawn/native-runtime/containerization-0.45.0/images/containers"
+[[ -d "${native_containers}" ]] || fail "native launch did not create its expected container directory"
+native_children="$(find "${native_containers}" -mindepth 1 -maxdepth 1 -print)" \
+  || fail "could not inspect native launch cleanup"
+[[ -z "${native_children}" ]] || fail "native launch left container artifacts behind: ${native_children}"
+
 run_and_capture "Doctor JSON reports workspace defaults" "${SPAWN_BIN}" doctor "${ROOT}/fixtures/rust-sample" --json
 REPLY="$(unescape_json_slashes "${REPLY}")"
 expect_regex "${REPLY}" '"source"[[:space:]]*:[[:space:]]*"spawn-toml"' "rust doctor source"

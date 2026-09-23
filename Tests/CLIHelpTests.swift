@@ -11,6 +11,7 @@ import Testing
     #expect(help.contains("spawn -- cargo test"))
     #expect(help.contains("Runtime selection:"))
     #expect(help.contains("--runtime workspace-image"))
+    #expect(help.contains("--backend native-experimental"))
     #expect(help.contains("Workspace defaults:"))
     #expect(help.contains(".spawn.toml [workspace]   Default agent; access and cache sharing require flags"))
     // Every run option a user is likely to reach for must be discoverable from
@@ -32,6 +33,8 @@ import Testing
     #expect(help.contains("--access minimal"))
     #expect(help.contains("--runtime workspace-image"))
     #expect(help.contains("--rebuild-workspace-image"))
+    #expect(help.contains("--backend cli"))
+    #expect(help.contains("--backend native-experimental"))
     #expect(help.contains(".spawn.toml [workspace]        Default agent; access and cache sharing require flags"))
     #expect(help.contains("Safe mode is the default."))
     // Both scopes must be discoverable from help: the default is the safe one,

@@ -1,6 +1,22 @@
 import ArgumentParser
 import Foundation
 
+/// Launch backend selected explicitly by the user. Repository configuration
+/// cannot opt into the experimental backend.
+enum ContainerBackend: String, CaseIterable, Sendable {
+    case cli
+    case nativeExperimental = "native-experimental"
+
+    static func parse(_ value: String) throws -> ContainerBackend {
+        guard let backend = ContainerBackend(rawValue: value) else {
+            throw ValidationError(
+                "Unknown backend: \(value). Use 'cli' or 'native-experimental'."
+            )
+        }
+        return backend
+    }
+}
+
 /// Supported language toolchains, each corresponding to a container image variant.
 enum Toolchain: String, CaseIterable, Sendable {
     case base

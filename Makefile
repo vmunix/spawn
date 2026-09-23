@@ -11,6 +11,7 @@ endif
 
 build:
 	swift build -c release
+	codesign --force --sign - --timestamp=none --entitlements spawn.entitlements .build/release/$(BINARY)
 
 lint:
 	swift format lint --strict -r Sources Tests

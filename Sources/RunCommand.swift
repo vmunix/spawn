@@ -26,6 +26,10 @@ extension Spawn {
                   --runtime workspace-image      Build or reuse a workspace runtime
                   --rebuild-workspace-image      Ignore cache for workspace-image runs
 
+                Launch backends:
+                  --backend cli                  Default; launch through Apple's container CLI
+                  --backend native-experimental  Launch through Apple's Containerization library
+
                 Build caches:
                   --cache workspace              Default; caches private to this workspace
                   --cache shared                 Reuse one cache across every opted-in workspace (flag only)
@@ -87,6 +91,9 @@ extension Spawn {
 
         @Option(name: .long, help: "Runtime mode: auto, spawn, workspace-image.")
         var runtime: String = RuntimeMode.auto.rawValue
+
+        @Option(name: .long, help: "Launch backend: cli (default), native-experimental.")
+        var backend: String = ContainerBackend.cli.rawValue
 
         @Flag(name: .long, help: "Force a rebuild when using '--runtime workspace-image'.")
         var rebuildWorkspaceImage: Bool = false
@@ -199,22 +206,35 @@ extension Spawn {
         func executeLaunch(
             _ launch: ResolvedLaunch,
             using containerRuntime: any ContainerRuntime
-        ) throws {
-            let status = try containerRuntime.launch(launch.plan)
+        ) async throws {
+            let status = try await containerRuntime.launch(launch.plan)
             if status != 0 {
                 throw ExitCode(status)
             }
         }
 
         mutating func run() async throws {
-            try await run(using: ContainerRuntimes.defaultRuntime())
+            try await run(using: ProductionContainerRuntimeFactory())
         }
 
-        /// Execute the parsed command through one injected semantic runtime.
-        /// Production supplies the default adapter above; tests use this same
-        /// path to prove the final resolved plan crosses the runtime boundary.
+        /// Execute through a fixed runtime. Tests use this convenience to prove
+        /// the fully resolved launch crosses the semantic boundary unchanged.
         mutating func run(
             using containerRuntime: any ContainerRuntime,
+            imageStoreRoot: URL? = nil,
+            stateDir: URL = Paths.stateDir
+        ) async throws {
+            try await run(
+                using: FixedContainerRuntimeFactory(runtime: containerRuntime),
+                imageStoreRoot: imageStoreRoot,
+                stateDir: stateDir
+            )
+        }
+
+        /// Execute through an injected factory so tests cover the real parsed
+        /// backend selector rather than merely testing the enum in isolation.
+        mutating func run(
+            using runtimeFactory: any ContainerRuntimeFactory,
             imageStoreRoot: URL? = nil,
             stateDir: URL = Paths.stateDir
         ) async throws {
@@ -265,6 +285,7 @@ extension Spawn {
             // cannot come from different decisions, and by then a workspace image
             // may already have been built.
             _ = try resolvedCacheSelection(workspaceConfig: workspaceConfig)
+            let selectedBackend = try ContainerBackend.parse(backend)
             let runtimeMode = try RuntimeMode.parse(runtime)
             try RunRuntimePolicy.validateOptions(
                 runtimeMode: runtimeMode,
@@ -401,7 +422,22 @@ extension Spawn {
             fflush(stdout)
 
             // Run
-            try executeLaunch(launch, using: containerRuntime)
+            let containerRuntime = try runtimeFactory.makeRuntime(
+                for: selectedBackend,
+                stateDir: stateDir
+            )
+            try await executeLaunch(launch, using: containerRuntime)
         }
+    }
+}
+
+private struct FixedContainerRuntimeFactory: ContainerRuntimeFactory {
+    let runtime: any ContainerRuntime
+
+    func makeRuntime(
+        for backend: ContainerBackend,
+        stateDir: URL
+    ) throws -> any ContainerRuntime {
+        runtime
     }
 }

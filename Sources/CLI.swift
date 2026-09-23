@@ -40,6 +40,10 @@ struct Spawn: AsyncParsableCommand {
               --runtime workspace-image Use a workspace Dockerfile/devcontainer build
               --rebuild-workspace-image Force a rebuild for workspace-image runs
 
+            Launch backend:
+              --backend cli                  Default; use Apple's container CLI
+              --backend native-experimental  Use Apple's Containerization library (experimental)
+
             Workspace defaults:
               .spawn.toml [workspace]   Default agent; access and cache sharing require flags
               .spawn.toml [toolchain]   Default spawn-managed toolchain base

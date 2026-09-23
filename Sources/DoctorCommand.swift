@@ -139,7 +139,7 @@ extension Spawn {
 
             return SystemStatus(
                 status: status,
-                appRoot: fields["appRoot"]
+                appRoot: fields["paths.appRoot"] ?? fields["appRoot"]
             )
         }
 

@@ -54,6 +54,23 @@ import Testing
     )
 }
 
+@Test func parseSystemStatusReadsNamespacedAppRootFromNewerCli() {
+    let output = """
+        FIELD               VALUE
+        status              running
+        paths.appRoot       /Users/me/Library/Application Support/com.apple.container/
+        paths.installRoot   /opt/homebrew/Cellar/container/1.4.1/
+        """
+
+    #expect(
+        Spawn.Doctor.parseSystemStatus(output)
+            == Spawn.Doctor.SystemStatus(
+                status: "running",
+                appRoot: "/Users/me/Library/Application Support/com.apple.container/"
+            )
+    )
+}
+
 @Test func parseSystemStatusReturnsNilWithoutStatusField() {
     let output = """
         FIELD              VALUE
