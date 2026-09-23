@@ -54,6 +54,23 @@ import Testing
     )
 }
 
+@Test func parseSystemStatusReadsNamespacedAppRootFromNewerCli() {
+    let output = """
+        FIELD               VALUE
+        status              running
+        paths.appRoot       /Users/me/Library/Application Support/com.apple.container/
+        paths.installRoot   /opt/homebrew/Cellar/container/1.4.1/
+        """
+
+    #expect(
+        Spawn.Doctor.parseSystemStatus(output)
+            == Spawn.Doctor.SystemStatus(
+                status: "running",
+                appRoot: "/Users/me/Library/Application Support/com.apple.container/"
+            )
+    )
+}
+
 @Test func parseSystemStatusReturnsNilWithoutStatusField() {
     let output = """
         FIELD              VALUE
@@ -139,7 +156,8 @@ import Testing
         workspaceConfig: WorkspaceConfig(
             toolchainName: "rust",
             agentName: "codex",
-            accessName: "git"
+            accessName: "git",
+            cacheName: nil
         )
     )
 
@@ -263,7 +281,7 @@ import Testing
     let report = Spawn.Doctor.workspaceReport(
         path: workspace,
         inspection: ToolchainDetector.Inspection(toolchain: nil, source: .dockerfile),
-        workspaceConfig: WorkspaceConfig(toolchainName: nil, agentName: "codex", accessName: "git"),
+        workspaceConfig: WorkspaceConfig(toolchainName: nil, agentName: "codex", accessName: "git", cacheName: nil),
         stateDir: stateDir,
         storeRoot: storeRoot
     )
@@ -274,6 +292,260 @@ import Testing
     #expect(report.runtime?.dockerfilePath == plan.dockerfile.path)
     #expect(report.runtime?.dockerignorePath == plan.dockerignore?.path)
     #expect(report.runtime?.cacheRecordPath == plan.cacheRecord.path)
+}
+
+/// A workspace path for cache-scope assertions. Never touched on disk: the
+/// cache-path functions are pure.
+private let cacheWorkspace = URL(fileURLWithPath: "/Users/me/code/project")
+
+/// Cache root for the doctor cache checks, passed explicitly so they never
+/// derive a path from the real state directory.
+private let doctorCacheRoot = URL(fileURLWithPath: "/state/spawn/caches")
+
+/// Whether a check's detail names exactly this cache directory.
+///
+/// Plain `contains` cannot answer that: a cache root is a prefix of every cache
+/// under it, so `contains("/state/spawn/caches/shared")` is satisfied by a
+/// directory merely named `shared-2`. The lookahead requires the match to end at
+/// a path boundary, and still matches a directory doctor rendered as
+/// `<path> (not created yet)`.
+private func namesPath(_ detail: String, _ path: String) -> Bool {
+    let pattern = NSRegularExpression.escapedPattern(for: path) + "(?![-/A-Za-z0-9._])"
+    return detail.range(of: pattern, options: .regularExpression) != nil
+}
+
+@Test func thePathMatcherRequiresAWholeDirectory() {
+    // Guards the guard: a matcher that accepted a prefix would report the shared
+    // cache as "named" by any detail listing a directory beside it.
+    let scoped = "rust [workspace scope]: /state/spawn/caches/project-1a2b/cargo-registry (not created yet)"
+    #expect(namesPath(scoped, "/state/spawn/caches/project-1a2b/cargo-registry"))
+    #expect(!namesPath(scoped, "/state/spawn/caches/project-1a2b"))
+    #expect(!namesPath(scoped, "/state/spawn/caches/shared/cargo-registry"))
+
+    let shared = "rust [shared scope]: /state/spawn/caches/shared/cargo-registry, /state/spawn/caches/shared/cargo-git"
+    #expect(namesPath(shared, "/state/spawn/caches/shared/cargo-registry"))
+    #expect(namesPath(shared, "/state/spawn/caches/shared/cargo-git"))
+}
+
+@Test func doctorReportsBuildCaches() {
+    let caches = CacheMounts.forToolchain(.rust, scope: .shared, workspace: cacheWorkspace, root: doctorCacheRoot)
+    let check = Spawn.Doctor.cacheMountCheck(
+        toolchain: .rust,
+        scope: .shared,
+        mounts: caches,
+        status: { _ in .ready }
+    )
+
+    #expect(check.status == .ok)
+    #expect(check.title == "Build caches")
+    #expect(check.detail == "rust [shared scope]: \(caches.map(\.hostPath).joined(separator: ", "))")
+}
+
+@Test func doctorMarksBuildCachesThatDoNotExistYet() {
+    let caches = CacheMounts.forToolchain(.rust, scope: .workspace, workspace: cacheWorkspace, root: doctorCacheRoot)
+    let check = Spawn.Doctor.cacheMountCheck(
+        toolchain: .rust,
+        scope: .workspace,
+        mounts: caches,
+        status: { _ in .missing }
+    )
+
+    #expect(check.status == .ok)
+    let described = caches.map { "\($0.hostPath) (not created yet)" }.joined(separator: ", ")
+    #expect(check.detail == "rust [workspace scope]: \(described)")
+}
+
+@Test func doctorMarksOnlyTheMissingBuildCache() {
+    let caches = CacheMounts.forToolchain(.rust, scope: .workspace, workspace: cacheWorkspace, root: doctorCacheRoot)
+    guard let present = caches.first, let missing = caches.last, caches.count == 2 else {
+        Issue.record("expected rust to declare two caches")
+        return
+    }
+    let check = Spawn.Doctor.cacheMountCheck(
+        toolchain: .rust,
+        scope: .workspace,
+        mounts: caches,
+        status: { $0 == present.hostPath ? .ready : .missing }
+    )
+
+    #expect(check.detail == "rust [workspace scope]: \(present.hostPath), \(missing.hostPath) (not created yet)")
+}
+
+@Test func doctorNamesEveryBuildCacheOfAToolchain() {
+    for toolchain in Toolchain.allCases {
+        for scope in CacheScope.allCases {
+            let caches = CacheMounts.forToolchain(
+                toolchain, scope: scope, workspace: cacheWorkspace, root: doctorCacheRoot
+            )
+            let check = Spawn.Doctor.cacheMountCheck(
+                toolchain: toolchain,
+                scope: scope,
+                mounts: caches,
+                status: { _ in .ready }
+            )
+            for cache in caches {
+                #expect(namesPath(check.detail, cache.hostPath))
+            }
+        }
+    }
+}
+
+@Test func doctorReportsWhereACacheIsMounted() {
+    // The host path alone does not say what a run does with it. Doctor's own
+    // check on a real directory is what tells the user whether it exists.
+    let caches = CacheMounts.forToolchain(.js, scope: .workspace, workspace: cacheWorkspace, root: doctorCacheRoot)
+    let check = Spawn.Doctor.cacheMountCheck(
+        toolchain: .js,
+        scope: .workspace,
+        mounts: caches,
+        status: { CacheMounts.directoryStatus(at: $0) }
+    )
+
+    #expect(!caches.isEmpty)
+    // None of these temp-free paths exist, so every one must be annotated.
+    for cache in caches {
+        #expect(check.detail.contains("\(cache.hostPath) (not created yet)"))
+    }
+}
+
+@Test func doctorUsesTheSameCacheDirectoryReadinessCheckAsLaunches() throws {
+    let base = try makeTempDir(files: ["not-a-directory": "x"])
+    #expect(CacheMounts.directoryStatus(at: base.path) == .ready)
+    #expect(CacheMounts.directoryStatus(at: base.appendingPathComponent("not-a-directory").path) == .notDirectory)
+    #expect(CacheMounts.directoryStatus(at: base.appendingPathComponent("absent").path) == .missing)
+}
+
+@Test func doctorWarnsAboutAnUnwritableCacheDirectory() {
+    let caches = CacheMounts.forToolchain(.go, scope: .workspace, workspace: cacheWorkspace, root: doctorCacheRoot)
+    let check = Spawn.Doctor.cacheMountCheck(
+        toolchain: .go,
+        scope: .workspace,
+        mounts: caches,
+        status: { _ in .notWritable }
+    )
+
+    #expect(!caches.isEmpty)
+    #expect(check.status == .warning)
+    for cache in caches {
+        #expect(check.detail.contains("\(cache.hostPath) (not writable)"))
+    }
+}
+
+// MARK: - Doctor reports the caches a run would really mount
+
+@Test func doctorNamesTheCachesTheWorkspaceWouldActuallyMount() throws {
+    // The reason this check exists: doctor once named the global volumes while
+    // a run mounted workspace-scoped ones, so its output was decorative. The
+    // expectation is computed from the run path, not written out by hand.
+    let workspace = try makeTempDir(files: ["Cargo.toml": "[package]\nname = \"x\"\n"])
+    let expected = CacheMounts.forRun(
+        toolchain: .rust, imageOverride: nil, scope: .workspace, workspace: workspace, root: doctorCacheRoot
+    )
+
+    let check = Spawn.Doctor.cacheCheck(
+        workspace: workspace,
+        toolchain: .rust,
+        workspaceConfig: nil,
+        root: doctorCacheRoot,
+        status: { _ in .ready }
+    )
+
+    #expect(!expected.isEmpty)
+    for cache in expected {
+        #expect(namesPath(check.detail, cache.hostPath))
+    }
+    // And it must not advertise a cache this workspace never touches.
+    for shared in CacheMounts.forToolchain(.rust, scope: .shared, workspace: workspace, root: doctorCacheRoot) {
+        #expect(!namesPath(check.detail, shared.hostPath))
+    }
+}
+
+@Test func doctorReportsThePrivateCachesWhenARepoAsksToShare() throws {
+    // A run without `--cache shared` uses the private caches whatever the repo
+    // asked for, so doctor must name those — and say the request was ignored,
+    // or the two would disagree about what happens next.
+    let workspace = try makeTempDir(files: [:])
+    let config = WorkspaceConfig(toolchainName: nil, agentName: nil, accessName: nil, cacheName: "shared")
+
+    let check = Spawn.Doctor.cacheCheck(
+        workspace: workspace,
+        toolchain: .rust,
+        workspaceConfig: config,
+        root: doctorCacheRoot,
+        status: { _ in .ready }
+    )
+
+    let mounted = CacheMounts.forRun(
+        toolchain: .rust, imageOverride: nil, scope: .workspace, workspace: workspace, root: doctorCacheRoot
+    )
+    #expect(!mounted.isEmpty)
+    for cache in mounted {
+        #expect(namesPath(check.detail, cache.hostPath))
+    }
+    for cache in CacheMounts.forToolchain(.rust, scope: .shared, workspace: workspace, root: doctorCacheRoot) {
+        #expect(!namesPath(check.detail, cache.hostPath))
+    }
+    #expect(check.detail.contains("cache=shared ignored"))
+    #expect(check.detail.contains("--cache shared"))
+}
+
+@Test func doctorSaysNothingAboutAnHonouredCacheScope() throws {
+    let workspace = try makeTempDir(files: [:])
+    let config = WorkspaceConfig(toolchainName: nil, agentName: nil, accessName: nil, cacheName: "workspace")
+
+    let check = Spawn.Doctor.cacheCheck(
+        workspace: workspace,
+        toolchain: .rust,
+        workspaceConfig: config,
+        root: doctorCacheRoot,
+        status: { _ in .ready }
+    )
+    let unset = Spawn.Doctor.cacheCheck(
+        workspace: workspace,
+        toolchain: .rust,
+        workspaceConfig: nil,
+        root: doctorCacheRoot,
+        status: { _ in .ready }
+    )
+
+    #expect(check.detail == unset.detail)
+    #expect(!check.detail.contains("ignored"))
+}
+
+@Test func doctorIgnoresAnUnusableConfiguredCacheScope() throws {
+    // An unparseable value selects nothing, exactly as an unknown access value
+    // does, and leaves the private default in place.
+    let workspace = try makeTempDir(files: [:])
+    let config = WorkspaceConfig(toolchainName: nil, agentName: nil, accessName: nil, cacheName: "everyone")
+
+    let check = Spawn.Doctor.cacheCheck(
+        workspace: workspace,
+        toolchain: .rust,
+        workspaceConfig: config,
+        root: doctorCacheRoot,
+        status: { _ in .ready }
+    )
+
+    #expect(check.status == .ok)
+    let expected = CacheMounts.forRun(
+        toolchain: .rust, imageOverride: nil, scope: .workspace, workspace: workspace, root: doctorCacheRoot
+    )
+    #expect(!expected.isEmpty)
+    for cache in expected {
+        #expect(namesPath(check.detail, cache.hostPath))
+    }
+}
+
+@Test func doctorReportsNoBuildCachesForBase() {
+    let check = Spawn.Doctor.cacheMountCheck(
+        toolchain: .base,
+        scope: .workspace,
+        mounts: [],
+        status: { _ in .missing }
+    )
+
+    #expect(check.status == .ok)
+    #expect(check.detail == "base: none needed")
 }
 
 @Test func renderJSONIncludesStructuredWorkspaceRuntime() throws {
@@ -300,6 +572,18 @@ import Testing
                 configPath: nil,
                 cacheRecordPath: "/tmp/cache.json"
             )
+        ),
+        nativeCache: NativeCacheStore.Snapshot(
+            path: "/state/native-runtime",
+            entries: [
+                NativeCacheStore.Entry(
+                    name: "containerization-0.45.0",
+                    path: "/state/native-runtime/containerization-0.45.0",
+                    allocatedBytes: 4096,
+                    isCurrent: true,
+                    isPendingDeletion: false
+                )
+            ]
         )
     )
 
@@ -309,12 +593,38 @@ import Testing
     let workspace = try #require(object["workspace"] as? [String: Any])
     let runtime = try #require(workspace["runtime"] as? [String: Any])
     let checks = try #require(object["checks"] as? [[String: Any]])
+    let nativeCache = try #require(object["nativeCache"] as? [String: Any])
+    let nativeEntries = try #require(nativeCache["entries"] as? [[String: Any]])
 
     #expect(workspace["source"] as? String == "dockerfile")
     #expect(runtime["cacheStatus"] as? String == "stale")
     #expect(runtime["cacheReason"] as? String == "build inputs changed")
     #expect(runtime["dockerignorePath"] as? String == "/tmp/project/.dockerignore")
     #expect(checks.first?["status"] as? String == "ok")
+    #expect(nativeEntries.first?["allocatedBytes"] as? Int == 4096)
+    #expect(nativeCache["allocatedBytes"] as? Int == 4096)
+}
+
+@Test func doctorReportsNativeCacheWithoutCreatingIt() throws {
+    let stateDir = try makeTempDir(files: [:])
+    let root = stateDir.appendingPathComponent("native-runtime")
+
+    let missing = Spawn.Doctor.nativeCacheCheck(stateDir: stateDir)
+    #expect(missing.check.status == .ok)
+    #expect(missing.snapshot?.entries.isEmpty == true)
+    #expect(!FileManager.default.fileExists(atPath: root.path))
+
+    let store = NativeCacheStore(stateRoot: root)
+    try FileManager.default.createDirectory(at: store.currentRoot, withIntermediateDirectories: true)
+    try Data(repeating: 42, count: 4096).write(
+        to: store.currentRoot.appendingPathComponent("content")
+    )
+    let present = Spawn.Doctor.nativeCacheCheck(stateDir: stateDir)
+    #expect(present.check.status == .ok)
+    #expect(present.check.detail.contains(store.currentRoot.path))
+    #expect(present.check.detail.contains("spawn cache clean --native"))
+    #expect(present.snapshot?.entries.first?.isCurrent == true)
+    #expect((present.snapshot?.allocatedBytes ?? 0) > 0)
 }
 
 private func writeCacheRecord(for plan: WorkspaceImageRuntime.Plan) throws {

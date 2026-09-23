@@ -1,6 +1,22 @@
 import ArgumentParser
 import Foundation
 
+/// Launch backend selected explicitly by the user. Repository configuration
+/// cannot opt into the experimental backend.
+enum ContainerBackend: String, CaseIterable, Sendable {
+    case cli
+    case nativeExperimental = "native-experimental"
+
+    static func parse(_ value: String) throws -> ContainerBackend {
+        guard let backend = ContainerBackend(rawValue: value) else {
+            throw ValidationError(
+                "Unknown backend: \(value). Use 'cli' or 'native-experimental'."
+            )
+        }
+        return backend
+    }
+}
+
 /// Supported language toolchains, each corresponding to a container image variant.
 enum Toolchain: String, CaseIterable, Sendable {
     case base
@@ -65,11 +81,36 @@ enum AccessProfile: String, CaseIterable, Sendable {
     }
 }
 
+/// Controls whether build caches are private to one workspace or shared across
+/// every workspace that opts in.
+///
+/// The default is `workspace`: a cache holds dependency sources fetched with
+/// the workspace's own credentials — `cargo`'s git cache can hold private
+/// repositories — and it is mounted read-write, so a shared cache is both a
+/// confidentiality and an integrity channel between unrelated workspaces.
+/// Sharing is therefore something a user asks for, not something they get.
+enum CacheScope: String, CaseIterable, Sendable {
+    /// Cache directories carry the workspace identity, so no two workspaces meet.
+    case workspace
+    /// One cache directory, shared by every opted-in workspace.
+    case shared
+
+    /// Parse a cache scope name, throwing a clear error if invalid.
+    static func parse(_ name: String) throws -> CacheScope {
+        guard let scope = CacheScope(rawValue: name) else {
+            let valid = CacheScope.allCases.map(\.rawValue).joined(separator: ", ")
+            throw ValidationError("Unknown cache scope: \(name). Use: \(valid).")
+        }
+        return scope
+    }
+}
+
 /// Parsed workspace defaults from `.spawn.toml`.
 struct WorkspaceConfig: Sendable, Equatable {
     let toolchainName: String?
     let agentName: String?
     let accessName: String?
+    let cacheName: String?
 
     var toolchain: Toolchain? {
         guard let toolchainName else { return nil }
@@ -79,6 +120,11 @@ struct WorkspaceConfig: Sendable, Equatable {
     var accessProfile: AccessProfile? {
         guard let accessName else { return nil }
         return AccessProfile(rawValue: accessName)
+    }
+
+    var cacheScope: CacheScope? {
+        guard let cacheName else { return nil }
+        return CacheScope(rawValue: cacheName)
     }
 }
 
@@ -98,7 +144,7 @@ enum RuntimeMode: String, CaseIterable, Sendable {
 }
 
 /// A host-to-guest filesystem mount for the container.
-struct Mount: Sendable {
+struct Mount: Sendable, Equatable {
     let hostPath: String
     let guestPath: String
     let readOnly: Bool

@@ -1,3 +1,4 @@
+import ArgumentParser
 import Foundation
 import Testing
 
@@ -50,6 +51,34 @@ import Testing
 
     #expect(parsed.cwd == "/tmp/project")
     #expect(parsed.shell == true)
+}
+
+@Test func runParserDefaultsToCliAndAcceptsExperimentalNativeBackend() throws {
+    let defaultCommand = try Spawn.Run.parseAsRoot([])
+    let defaultRun = try #require(defaultCommand as? Spawn.Run)
+    #expect(defaultRun.backend == "cli")
+
+    let nativeCommand = try Spawn.Run.parseAsRoot([
+        "--backend", "native-experimental",
+    ])
+    let nativeRun = try #require(nativeCommand as? Spawn.Run)
+    #expect(nativeRun.backend == "native-experimental")
+}
+
+@Test func nativeCacheCleanRequiresAnExplicitFlag() throws {
+    let command = try Spawn.parseAsRoot(["cache", "clean", "--native"])
+    let clean = try #require(command as? Spawn.Cache.Clean)
+    #expect(clean.native)
+
+    let preview = try #require(
+        Spawn.parseAsRoot(["cache", "clean", "--native", "--dry-run"]) as? Spawn.Cache.Clean
+    )
+    #expect(preview.native && preview.dryRun)
+
+    var unconfirmed = try #require(Spawn.parseAsRoot(["cache", "clean"]) as? Spawn.Cache.Clean)
+    #expect(throws: ValidationError.self) {
+        try unconfirmed.run()
+    }
 }
 
 @Test func rootRoutingDefaultsToRunCommand() throws {

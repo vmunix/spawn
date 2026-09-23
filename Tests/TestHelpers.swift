@@ -1,8 +1,38 @@
 import Foundation
 
+@testable import spawn
+
 /// Helper: create a file URL from a path string
 func fileURL(_ path: String) -> URL {
     URL(fileURLWithPath: path)
+}
+
+/// Build a resolved plan for argument-rendering tests.
+func makeLaunchPlan(
+    image: String,
+    mounts: [Mount],
+    env: [String: String],
+    workdir: String,
+    entrypoint: [String],
+    cpus: Int,
+    memory: String,
+    keepStandardInputOpen: Bool = true,
+    allocateTerminal: Bool = false,
+    removeOnExit: Bool = true
+) -> ResolvedLaunchPlan {
+    ResolvedLaunchPlan(
+        image: image,
+        mounts: mounts,
+        environment: env,
+        workdir: workdir,
+        entrypoint: entrypoint,
+        resources: .init(cpus: cpus, memory: memory),
+        io: .init(
+            keepStandardInputOpen: keepStandardInputOpen,
+            allocateTerminal: allocateTerminal
+        ),
+        removeOnExit: removeOnExit
+    )
 }
 
 nonisolated(unsafe) private var hasCleanedUp = false

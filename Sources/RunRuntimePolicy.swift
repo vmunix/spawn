@@ -1,7 +1,34 @@
 import ArgumentParser
+import Foundation
 
 /// Centralizes runtime and access rules for workspace launches.
 enum RunRuntimePolicy: Sendable {
+    /// The cache decision for one launch, resolved before any container work.
+    ///
+    /// Keeping the image override in the decision makes "custom images get no
+    /// caches" part of the same value as the scope and warning. Callers cannot
+    /// report one policy and later construct mounts from a second set of raw
+    /// CLI/config inputs.
+    struct CacheSelection: Sendable, Equatable {
+        let scope: CacheScope
+        let ignoredConfiguredScope: CacheScope?
+        let imageOverride: String?
+
+        func mounts(
+            toolchain: Toolchain,
+            workspace: URL,
+            root: URL = CacheMounts.root()
+        ) -> [Mount] {
+            CacheMounts.forRun(
+                toolchain: toolchain,
+                imageOverride: imageOverride,
+                scope: scope,
+                workspace: workspace,
+                root: root
+            )
+        }
+    }
+
     static func requiresExplicitRuntimeSelection(for source: ToolchainDetector.Source) -> Bool {
         switch source {
         case .dockerfile, .devcontainerDockerfile:
@@ -56,5 +83,50 @@ enum RunRuntimePolicy: Sendable {
         }
 
         return AccessProfile.minimal.rawValue
+    }
+
+    /// Resolves all cache policy for a run from its CLI and repository inputs.
+    ///
+    /// Repo-controlled config never widens exposure, the same rule `access`
+    /// follows. `shared` reaches into caches other workspaces wrote and lets
+    /// this one rewrite what they build against next — the cross-workspace
+    /// channel scoping exists to close — so only an explicit `--cache shared`
+    /// may select it. A repo asking for `workspace` is a narrowing and is
+    /// honoured silently; a repo asking for anything else is ignored and
+    /// reported in the returned selection.
+    static func resolveCacheSelection(
+        cacheOverride: String?,
+        imageOverride: String?,
+        workspaceConfig: WorkspaceConfig?
+    ) throws -> CacheSelection {
+        if let cacheOverride {
+            return CacheSelection(
+                scope: try CacheScope.parse(cacheOverride),
+                ignoredConfiguredScope: nil,
+                imageOverride: imageOverride
+            )
+        }
+
+        let selection = defaultCacheSelection(workspaceConfig: workspaceConfig)
+        return CacheSelection(
+            scope: selection.scope,
+            ignoredConfiguredScope: selection.ignoredConfiguredScope,
+            imageOverride: imageOverride
+        )
+    }
+
+    /// The selection doctor reports for a run without CLI overrides.
+    ///
+    /// An unparseable value is not reported: it selected nothing, exactly as an
+    /// unparseable `access` value does.
+    static func defaultCacheSelection(
+        workspaceConfig: WorkspaceConfig?
+    ) -> CacheSelection {
+        let configured = workspaceConfig?.cacheScope
+        return CacheSelection(
+            scope: .workspace,
+            ignoredConfiguredScope: configured.flatMap { $0 == .workspace ? nil : $0 },
+            imageOverride: nil
+        )
     }
 }

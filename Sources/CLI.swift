@@ -12,6 +12,7 @@ struct Spawn: AsyncParsableCommand {
         "exec",
         "shell",
         "doctor",
+        "cache",
         "help",
     ]
 
@@ -33,6 +34,7 @@ struct Spawn: AsyncParsableCommand {
               spawn -C ~/code/project  Run in another workspace
               spawn doctor             Check runtime readiness, images, config, and workspace detection
               spawn doctor --json      Machine-readable diagnostics
+              spawn cache clean --native Reclaim current experimental native artifacts
 
             Runtime selection:
               --runtime auto            Default; refuse to guess Dockerfile runtimes
@@ -40,8 +42,12 @@ struct Spawn: AsyncParsableCommand {
               --runtime workspace-image Use a workspace Dockerfile/devcontainer build
               --rebuild-workspace-image Force a rebuild for workspace-image runs
 
+            Launch backend:
+              --backend cli                  Default; use Apple's container CLI
+              --backend native-experimental  Use Apple's Containerization library (experimental)
+
             Workspace defaults:
-              .spawn.toml [workspace]   Default agent; access still requires --access
+              .spawn.toml [workspace]   Default agent; access and cache sharing require flags
               .spawn.toml [toolchain]   Default spawn-managed toolchain base
 
             Operational commands:
@@ -51,10 +57,12 @@ struct Spawn: AsyncParsableCommand {
               spawn exec <id> -- ls    Run a one-off command in a running container
               spawn shell <id>         Open a shell in a running container
               spawn stop <id>          Stop a running container
+              spawn cache clean --native Remove the current native backend cache
 
             Common run options:
               --yolo                   Skip permission gates (default: safe mode)
               --access <name>          Host access profile (minimal/git/trusted)
+              --cache <scope>          Build cache scope (workspace/shared; default per workspace)
               --shell                  Drop into a shell instead of running an agent
               --toolchain <name>       Override toolchain (base/cpp/rust/go/js)
 
@@ -63,7 +71,7 @@ struct Spawn: AsyncParsableCommand {
             Use `spawn help run` for launch options.
             """,
         version: "0.2.1",
-        subcommands: [Run.self, Build.self, Image.self, List.self, Stop.self, Exec.self, Shell.self, Doctor.self]
+        subcommands: [Run.self, Build.self, Image.self, List.self, Stop.self, Exec.self, Shell.self, Doctor.self, Cache.self]
     )
 
     static func rewrittenArguments(_ arguments: [String]) -> [String] {

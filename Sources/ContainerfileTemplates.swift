@@ -216,9 +216,16 @@ enum ContainerfileTemplates: Sendable {
         FROM spawn-base:latest
 
         USER root
-        RUN su - coder -c "curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y"
-        ENV PATH="/home/coder/.cargo/bin:${PATH}"
+        # Toolchains live in /opt, not $HOME: the home becomes user-owned and
+        # persistent, and 1.3G of .rustup across ~49k files makes that expensive.
+        RUN mkdir -p /opt/rust && chown -R coder:coder /opt/rust
+
         USER coder
+        ENV RUSTUP_HOME=/opt/rust/rustup CARGO_HOME=/opt/rust/cargo
+        # --no-modify-path: PATH comes from ENV below, not from ~/.bashrc.
+        RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \\
+            | sh -s -- -y --no-modify-path
+        ENV PATH="/opt/rust/cargo/bin:${PATH}"
         """
 
     static let go = """
@@ -226,8 +233,17 @@ enum ContainerfileTemplates: Sendable {
 
         USER root
         RUN curl -fsSL "https://go.dev/dl/go\(goVersion).linux-\(goArch).tar.gz" | tar -C /usr/local -xz
-        ENV PATH="/usr/local/go/bin:/home/coder/go/bin:${PATH}"
+        # GOPATH in /opt, not $HOME — `go install` and GOMODCACHE would otherwise
+        # fill the user's persistent home with build artifacts.
+        # The module cache path is created here, coder-owned: mounting a cache
+        # volume at /opt/go/pkg/mod otherwise makes the runtime create the
+        # intermediate /opt/go/pkg root-owned, and go can then no longer write
+        # its sibling /opt/go/pkg/sumdb.
+        RUN mkdir -p /opt/go/pkg/mod && chown -R coder:coder /opt/go
+
         USER coder
+        ENV GOPATH=/opt/go
+        ENV PATH="/usr/local/go/bin:/opt/go/bin:${PATH}"
         """
 
     static let js = """
@@ -235,6 +251,7 @@ enum ContainerfileTemplates: Sendable {
 
         USER root
 
+        # unzip is required by the bun installer — it exits 1 without it.
         RUN apt-get update && apt-get install -y --no-install-recommends unzip \\
             && rm -rf /var/lib/apt/lists/*
 
@@ -245,14 +262,23 @@ enum ContainerfileTemplates: Sendable {
         # Corepack gives first-class pnpm/yarn support for Node projects.
         RUN corepack enable
 
+        # Toolchains live in /opt, not $HOME — see the rust template.
+        RUN mkdir -p /opt/js && chown -R coder:coder /opt/js
+
         USER coder
+        ENV BUN_INSTALL=/opt/js/bun DENO_INSTALL=/opt/js/deno DENO_DIR=/opt/js/deno-cache
 
         # Bun
         RUN curl -fsSL https://bun.sh/install | bash -s "bun-v\(bunVersion)"
 
         # Deno
-        RUN curl -fsSL https://deno.land/install.sh | sh
+        RUN curl -fsSL https://deno.land/install.sh | sh -s -- -y
 
-        ENV PATH="/home/coder/.bun/bin:/home/coder/.deno/bin:${PATH}"
+        # Both installers append PATH lines to the shell rc files. PATH comes from
+        # ENV below, and the home must stay identical to spawn-base's, so revert them.
+        RUN cp /etc/skel/.bashrc /home/coder/.bashrc \\
+            && cp /etc/skel/.profile /home/coder/.profile
+
+        ENV PATH="/opt/js/bun/bin:/opt/js/deno/bin:${PATH}"
         """
 }

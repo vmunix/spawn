@@ -26,8 +26,16 @@ extension Spawn {
                   --runtime workspace-image      Build or reuse a workspace runtime
                   --rebuild-workspace-image      Ignore cache for workspace-image runs
 
+                Launch backends:
+                  --backend cli                  Default; launch through Apple's container CLI
+                  --backend native-experimental  Launch through Apple's Containerization library
+
+                Build caches:
+                  --cache workspace              Default; caches private to this workspace
+                  --cache shared                 Reuse one cache across every opted-in workspace (flag only)
+
                 Workspace defaults:
-                  .spawn.toml [workspace]        Default agent; access still requires --access
+                  .spawn.toml [workspace]        Default agent; access and cache sharing require flags
                   .spawn.toml [toolchain]        Default spawn-managed toolchain base
 
                 Other useful forms:
@@ -78,8 +86,14 @@ extension Spawn {
         @Option(name: .long, help: "Host access profile: minimal, git, trusted.")
         var access: String?
 
+        @Option(name: .long, help: "Build cache scope: workspace (default, private), shared.")
+        var cache: String?
+
         @Option(name: .long, help: "Runtime mode: auto, spawn, workspace-image.")
         var runtime: String = RuntimeMode.auto.rawValue
+
+        @Option(name: .long, help: "Launch backend: cli (default), native-experimental.")
+        var backend: String = ContainerBackend.cli.rawValue
 
         @Flag(name: .long, help: "Force a rebuild when using '--runtime workspace-image'.")
         var rebuildWorkspaceImage: Bool = false
@@ -119,7 +133,111 @@ extension Spawn {
             )
         }
 
+        /// Resolves cache policy from this parsed command's actual flags.
+        /// Tests call this boundary on a parsed `Spawn.Run`, so disconnecting
+        /// either `--cache` or `--image` from the launch fails without starting
+        /// a container.
+        func resolvedCacheSelection(
+            workspaceConfig: WorkspaceConfig?
+        ) throws -> RunRuntimePolicy.CacheSelection {
+            try RunRuntimePolicy.resolveCacheSelection(
+                cacheOverride: cache,
+                imageOverride: image,
+                workspaceConfig: workspaceConfig
+            )
+        }
+
+        /// Freeze this parsed command's final backend-neutral launch inputs,
+        /// together with what it must tell the user about its build caches.
+        ///
+        /// The cache decision is resolved here rather than accepted as an
+        /// argument: `run()` has no cache scope to pass, so it cannot hand the
+        /// runtime a scope other than the one whose notices it prints. The plan's
+        /// cache mounts and the returned notices come from one `CacheSelection`
+        /// derived from this command's own `--cache` and `--image`.
+        ///
+        /// `workspaceConfig` feeds only the "this repo asked to share and was
+        /// refused" notice. Repository configuration can never widen the scope —
+        /// `resolveCacheSelection` discards anything but a narrowing — so it
+        /// cannot move the mounted directories, whatever is passed here.
+        func resolvedLaunch(
+            image: String,
+            resolvedMounts: [Mount],
+            toolchain: Toolchain,
+            workspace: URL,
+            workspaceConfig: WorkspaceConfig?,
+            cacheRoot: URL = CacheMounts.root(),
+            environment: [String: String],
+            entrypoint: [String],
+            allocateTerminal: Bool = isatty(STDIN_FILENO) != 0
+        ) throws -> ResolvedLaunch {
+            let cacheSelection = try resolvedCacheSelection(workspaceConfig: workspaceConfig)
+            let preparedCacheMounts = CacheMounts.prepare(
+                cacheSelection.mounts(
+                    toolchain: toolchain,
+                    workspace: workspace,
+                    root: cacheRoot
+                )
+            )
+
+            let plan = try ResolvedLaunchPlan.workspace(
+                image: image,
+                resolvedMounts: resolvedMounts,
+                preparedCacheMounts: preparedCacheMounts,
+                environment: environment,
+                entrypoint: entrypoint,
+                cpus: cpus,
+                memory: memory,
+                allocateTerminal: allocateTerminal
+            )
+
+            return ResolvedLaunch(
+                plan: plan,
+                cacheNotices: RunLaunchSummary.cacheNotices(
+                    scope: cacheSelection.scope,
+                    ignoredConfiguredScope: cacheSelection.ignoredConfiguredScope
+                )
+            )
+        }
+
+        /// The single handoff from command orchestration to container execution.
+        /// Keeping status translation here makes every runtime obey the same CLI
+        /// exit behavior.
+        func executeLaunch(
+            _ launch: ResolvedLaunch,
+            using containerRuntime: any ContainerRuntime
+        ) async throws {
+            let status = try await containerRuntime.launch(launch.plan)
+            if status != 0 {
+                throw ExitCode(status)
+            }
+        }
+
         mutating func run() async throws {
+            try await run(using: ProductionContainerRuntimeFactory())
+        }
+
+        /// Execute through a fixed runtime. Tests use this convenience to prove
+        /// the fully resolved launch crosses the semantic boundary unchanged.
+        mutating func run(
+            using containerRuntime: any ContainerRuntime,
+            imageStoreRoot: URL? = nil,
+            stateDir: URL = Paths.stateDir
+        ) async throws {
+            try await run(
+                using: FixedContainerRuntimeFactory(runtime: containerRuntime),
+                imageStoreRoot: imageStoreRoot,
+                stateDir: stateDir
+            )
+        }
+
+        /// Execute through an injected factory so tests cover the real parsed
+        /// backend selector rather than merely testing the enum in isolation.
+        mutating func run(
+            using runtimeFactory: any ContainerRuntimeFactory,
+            imageStoreRoot: URL? = nil,
+            stateDir: URL = Paths.stateDir
+        ) async throws {
             if verbose { logger.logLevel = .debug }
             command = Self.normalizedCommand(command)
 
@@ -161,6 +279,13 @@ extension Spawn {
             if access == nil, let configuredAccess = workspaceConfig?.accessProfile, configuredAccess != .minimal {
                 print("Warning: ignoring .spawn.toml access=\(configuredAccess.rawValue). Pass '--access \(configuredAccess.rawValue)' explicitly to opt into host auth exposure.")
             }
+            // Reject a bad '--cache' before any container work. The resolved
+            // value is deliberately discarded: `resolvedLaunch` below derives it
+            // again from these same flags so that the mounts and the notices
+            // cannot come from different decisions, and by then a workspace image
+            // may already have been built.
+            _ = try resolvedCacheSelection(workspaceConfig: workspaceConfig)
+            let selectedBackend = try ContainerBackend.parse(backend)
             let runtimeMode = try RuntimeMode.parse(runtime)
             try RunRuntimePolicy.validateOptions(
                 runtimeMode: runtimeMode,
@@ -193,7 +318,8 @@ extension Spawn {
                 let managedImage = try ManagedImagePolicy.resolve(
                     detection: detection,
                     toolchainOverride: toolchain,
-                    imageOverride: image
+                    imageOverride: image,
+                    storeRoot: imageStoreRoot
                 )
                 resolvedToolchain = managedImage.toolchain
                 resolvedImage = managedImage.image
@@ -204,7 +330,7 @@ extension Spawn {
 
             // Seed Claude Code safe-mode permissions
             if !yolo, command.isEmpty, !shell, agent == "claude-code" {
-                let claudeSettingsDir = Paths.stateDir.appendingPathComponent(agent)
+                let claudeSettingsDir = stateDir.appendingPathComponent(agent)
                     .appendingPathComponent("claude")
                 SettingsSeeder.seed(settingsDir: claudeSettingsDir)
             }
@@ -215,9 +341,9 @@ extension Spawn {
                 additional: mount,
                 readOnly: readOnlyMounts,
                 access: accessProfile,
-                agent: agent
+                agent: agent,
+                stateDir: stateDir
             )
-
             // Load environment
             var environment: [String: String]
             if let envFile {
@@ -257,8 +383,19 @@ extension Spawn {
                 entrypoint = yolo ? profile.yoloEntrypoint : profile.safeEntrypoint
             }
 
-            // Working directory — derived from the primary mount's guest path
-            let workdir = resolvedMounts[0].guestPath
+            let launch = try resolvedLaunch(
+                image: resolvedImage,
+                resolvedMounts: resolvedMounts,
+                toolchain: resolvedToolchain,
+                workspace: path,
+                workspaceConfig: workspaceConfig,
+                cacheRoot: CacheMounts.root(stateDir: stateDir),
+                environment: environment,
+                entrypoint: entrypoint
+            )
+            for notice in launch.cacheNotices {
+                print(notice)
+            }
 
             let summaryLines = RunLaunchSummary.lines(
                 workspace: path,
@@ -285,19 +422,22 @@ extension Spawn {
             fflush(stdout)
 
             // Run
-            let status = try ContainerRunner.run(
-                image: resolvedImage,
-                mounts: resolvedMounts,
-                env: environment,
-                workdir: workdir,
-                entrypoint: entrypoint,
-                cpus: cpus,
-                memory: memory
+            let containerRuntime = try runtimeFactory.makeRuntime(
+                for: selectedBackend,
+                stateDir: stateDir
             )
-
-            if status != 0 {
-                throw ExitCode(status)
-            }
+            try await executeLaunch(launch, using: containerRuntime)
         }
+    }
+}
+
+private struct FixedContainerRuntimeFactory: ContainerRuntimeFactory {
+    let runtime: any ContainerRuntime
+
+    func makeRuntime(
+        for backend: ContainerBackend,
+        stateDir: URL
+    ) throws -> any ContainerRuntime {
+        runtime
     }
 }

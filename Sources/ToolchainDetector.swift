@@ -188,6 +188,7 @@ enum ToolchainDetector: Sendable {
         var toolchainName: String?
         var agentName: String?
         var accessName: String?
+        var cacheName: String?
 
         for line in content.components(separatedBy: .newlines) {
             let trimmed = line.trimmingCharacters(in: .whitespaces)
@@ -222,6 +223,8 @@ enum ToolchainDetector: Sendable {
                 agentName = value
             case ("workspace", "access"):
                 accessName = value
+            case ("workspace", "cache"):
+                cacheName = value
             default:
                 continue
             }
@@ -230,7 +233,8 @@ enum ToolchainDetector: Sendable {
         return WorkspaceConfig(
             toolchainName: toolchainName,
             agentName: agentName,
-            accessName: accessName
+            accessName: accessName,
+            cacheName: cacheName
         )
     }
 

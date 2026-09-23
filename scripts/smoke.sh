@@ -3,6 +3,7 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SPAWN_BIN="${ROOT}/.build/release/spawn"
+CONTAINER_BIN="${CONTAINER_BIN:-${CONTAINER_PATH:-container}}"
 
 section() {
   printf '=== %s ===\n' "$1"
@@ -43,10 +44,89 @@ expect_regex() {
   local pattern="$2"
   local label="$3"
 
-  if ! printf '%s\n' "${haystack}" | grep -Eq "${pattern}"; then
+  # The `--` is load-bearing: without it grep reads a pattern starting with `-`
+  # (every --volume assertion below) as an unknown option and exits 2 before
+  # reading stdin. That reads as "no match" here, so a correct run hard-fails,
+  # and as "matched" in expect_not_regex, so a regression passes silently.
+  if ! printf '%s\n' "${haystack}" | grep -Eq -- "${pattern}"; then
     printf '%s\n' "${haystack}" >&2
     fail "${label} did not match ${pattern}"
   fi
+}
+
+expect_not_regex() {
+  local haystack="$1"
+  local pattern="$2"
+  local label="$3"
+
+  if printf '%s\n' "${haystack}" | grep -Eq -- "${pattern}"; then
+    printf '%s\n' "${haystack}" >&2
+    fail "${label} unexpectedly matched ${pattern}"
+  fi
+}
+
+# Doctor's JSON escapes every forward slash (`\/`), so host paths only match
+# after unescaping. Applied to REPLY right after each doctor --json capture the
+# cache assertions read, never to run output, which is already plain text.
+unescape_json_slashes() {
+  printf '%s\n' "$1" | sed 's|\\/|/|g'
+}
+
+# First cargo-registry cache directory named in doctor output, or empty.
+cargo_registry_cache() {
+  printf '%s\n' "$1" | grep -Eo '/[^" ,]*/caches/[^" ,]+/cargo-registry' | head -1
+}
+
+# Every cache mount point's *parent* must already exist, coder-owned, in the
+# toolchain image. The runtime creates a missing mount parent root-owned
+# whatever backs the mount, and the tool can then no longer write that parent's
+# other children -- a root-owned /opt/go/pkg is what stopped `go` writing
+# sumdb beside the mounted mod, which the go template's `mkdir -p` exists to
+# prevent. rust and js satisfy the rule incidentally, so nothing but this check
+# tells a toolchain author their new cache path needs the same treatment.
+#
+# The guest paths come from the run's own `--verbose` argv, not a list kept
+# here: adding a cache to CacheMounts.forToolchain without fixing that
+# toolchain's template therefore fails this check with no smoke edit at all.
+check_cache_mount_parents() {
+  local label="$1" expected_count="$2"
+  shift 2
+
+  run_and_capture "${label}: run argv for cache mount points" "$@" --verbose -- true
+  # `--` before the pattern: it starts with `-`, and grep would otherwise read
+  # it as an option, exit 2, and print nothing -- which reads as "no caches" and
+  # would make every assertion below vacuous.
+  local guest_paths
+  guest_paths="$(printf '%s\n' "${REPLY}" | grep -Eo -- '--volume [^ ]*/caches/[^ ]+' | sed 's/.*://' | sort -u)"
+
+  local count
+  count="$(printf '%s\n' "${guest_paths}" | grep -c '^/' || true)"
+  [[ "${count}" == "${expected_count}" ]] \
+    || fail "${label}: expected ${expected_count} cache mounts in the run argv, saw ${count}: $(printf '%s ' ${guest_paths})"
+
+  # Written, not just stat'd: `touch` in the parent is exactly the sibling write
+  # a root-owned parent blocks, and it runs as the guest user a run really uses.
+  local probe="set -e" path
+  while read -r path; do
+    [[ -n "${path}" ]] || continue
+    probe+="
+parent=\$(dirname ${path})
+test -d \"\${parent}\" || { echo \"MISSING-PARENT \${parent}\"; exit 1; }
+touch \"\${parent}/.spawn-parent-probe\" || { echo \"UNWRITABLE-PARENT \${parent}\"; exit 1; }
+rm -f \"\${parent}/.spawn-parent-probe\"
+touch \"${path}/.spawn-cache-probe\" || { echo \"UNWRITABLE-CACHE ${path}\"; exit 1; }
+rm -f \"${path}/.spawn-cache-probe\"
+echo \"CHECKED ${path}\""
+  done <<<"${guest_paths}"
+  probe+="
+echo \"PASS: ${label} cache mount parents\""
+
+  run_and_capture "${label}: cache mount points are coder-writable" "$@" -- /bin/bash -lc "${probe}"
+  while read -r path; do
+    [[ -n "${path}" ]] || continue
+    expect_contains "${REPLY}" "CHECKED ${path}" "${label}: ${path} parent must be coder-writable in the image"
+  done <<<"${guest_paths}"
+  expect_contains "${REPLY}" "PASS: ${label} cache mount parents" "${label}: mount-parent probe must run to completion"
 }
 
 run_and_capture() {
@@ -66,6 +146,22 @@ run_and_capture() {
 
 [[ -x "${SPAWN_BIN}" ]] || fail "release binary not found at ${SPAWN_BIN}; run 'make build' first"
 
+# Keep every cache and state mutation owned by this smoke invocation. Besides
+# leaving the user's state untouched, this makes cleanup race-free: no real run
+# can be writing the directory removed by the EXIT trap.
+SMOKE_TEMP_ROOT="$(mktemp -d)"
+export XDG_STATE_HOME="${SMOKE_TEMP_ROOT}/state"
+CACHE_PROBE_DIR="${SMOKE_TEMP_ROOT}/cache-probe"
+mkdir -p "${CACHE_PROBE_DIR}"
+cleanup_smoke() {
+  if [[ -n "${NATIVE_BUSY_PID:-}" ]]; then
+    kill "${NATIVE_BUSY_PID}" 2>/dev/null || true
+    wait "${NATIVE_BUSY_PID}" 2>/dev/null || true
+  fi
+  rm -rf -- "${SMOKE_TEMP_ROOT}"
+}
+trap cleanup_smoke EXIT
+
 run_and_capture "Build spawn-managed images" "${SPAWN_BIN}" build
 
 run_and_capture "List spawn-managed images" "${SPAWN_BIN}" image list
@@ -75,14 +171,150 @@ expect_contains "${REPLY}" "spawn-go" "spawn image list"
 expect_contains "${REPLY}" "spawn-cpp" "spawn image list"
 expect_contains "${REPLY}" "spawn-js" "spawn image list"
 
+# The native adapter's library configuration is applied inside
+# ContainerManager.create. This launch checks that the real handoff reaches the
+# VM: removing the call that applies the plan must fail here, even if the pure
+# adapter tests still pass.
+run_and_capture "Native backend: launch plan reaches the VM" \
+  "${SPAWN_BIN}" -C "${ROOT}/fixtures/cpp-sample" --runtime spawn --toolchain base \
+  --backend native-experimental --env SPAWN_NATIVE_SMOKE=ready -- /bin/bash -lc \
+  'set -e; test "$PWD" = /workspace/cpp-sample; test -f CMakeLists.txt; test "$SPAWN_NATIVE_SMOKE" = ready; test "$(id -u)" = 1001; echo "PASS: native launch plan"'
+expect_contains "${REPLY}" "PASS: native launch plan" "native launch plan"
+native_containers="${XDG_STATE_HOME}/spawn/native-runtime/containerization-0.45.0/images/containers"
+[[ -d "${native_containers}" ]] || fail "native launch did not create its expected container directory"
+native_children="$(find "${native_containers}" -mindepth 1 -maxdepth 1 -print)" \
+  || fail "could not inspect native launch cleanup"
+[[ -z "${native_children}" ]] || fail "native launch left container artifacts behind: ${native_children}"
+
+run_and_capture "Doctor reports native artifact state" "${SPAWN_BIN}" doctor --json
+REPLY="$(unescape_json_slashes "${REPLY}")"
+expect_regex "${REPLY}" '"nativeCache"[[:space:]]*:' "native doctor JSON payload"
+expect_regex "${REPLY}" '"isCurrent"[[:space:]]*:[[:space:]]*true' "native doctor current cache"
+native_version_root="${XDG_STATE_HOME}/spawn/native-runtime/containerization-0.45.0"
+expect_contains "${REPLY}" "${native_version_root}" "native doctor cache path"
+run_and_capture "Doctor human output reports native artifact state" "${SPAWN_BIN}" doctor
+expect_contains "${REPLY}" "Native cache" "native doctor human check"
+expect_contains "${REPLY}" "${native_version_root}" "native doctor human cache path"
+
+# A running native VM must keep its launch clone until it exits. Cleanup takes
+# an exclusive lifecycle lock and refuses to remove that clone underneath it.
+section "Native cache clean refuses an active launch"
+native_busy_output="${SMOKE_TEMP_ROOT}/native-busy.log"
+"${SPAWN_BIN}" -C "${ROOT}/fixtures/cpp-sample" --runtime spawn --toolchain base \
+  --backend native-experimental -- /bin/bash -lc 'echo NATIVE_BUSY; sleep 10' \
+  >"${native_busy_output}" 2>&1 &
+NATIVE_BUSY_PID=$!
+for _ in {1..100}; do
+  if grep -q -- '^NATIVE_BUSY$' "${native_busy_output}"; then break; fi
+  kill -0 "${NATIVE_BUSY_PID}" 2>/dev/null || fail "native busy launch exited before cleanup check"
+  sleep 0.1
+done
+grep -q -- '^NATIVE_BUSY$' "${native_busy_output}" || fail "native busy launch never reached its workload"
+if native_clean_busy="$("${SPAWN_BIN}" cache clean --native --dry-run 2>&1)"; then
+  fail "native cache clean dry-run acquired an exclusive lease while a native VM was active"
+fi
+expect_contains "${native_clean_busy}" "in use by an active launch" "native cleanup lock"
+[[ -d "${native_version_root}" ]] || fail "native cleanup removed an active VM's artifacts"
+wait "${NATIVE_BUSY_PID}" || fail "native busy launch failed"
+NATIVE_BUSY_PID=""
+
+run_and_capture "Native cache clean reclaims the current version" "${SPAWN_BIN}" cache clean --native
+[[ ! -e "${native_version_root}" ]] || fail "native cache clean left the current version behind"
+
 run_and_capture "Doctor JSON reports workspace defaults" "${SPAWN_BIN}" doctor "${ROOT}/fixtures/rust-sample" --json
+REPLY="$(unescape_json_slashes "${REPLY}")"
 expect_regex "${REPLY}" '"source"[[:space:]]*:[[:space:]]*"spawn-toml"' "rust doctor source"
 expect_regex "${REPLY}" '"agent"[[:space:]]*:[[:space:]]*"codex"' "rust doctor agent default"
 expect_regex "${REPLY}" '"access"[[:space:]]*:[[:space:]]*"minimal"' "rust doctor access default"
+expect_regex "${REPLY}" 'rust \[workspace scope\]' "rust doctor cache scope"
+expect_regex "${REPLY}" '/caches/rust-sample-[0-9a-f]+/cargo-registry' "rust doctor cache directories"
+expect_regex "${REPLY}" '/caches/rust-sample-[0-9a-f]+/cargo-git' "rust doctor cache directories"
+# The shared directory belongs to '--cache shared' only: a default run must
+# never be told it uses it.
+expect_not_regex "${REPLY}" '/caches/shared/' "rust doctor default cache scope"
+RUST_FIXTURE_CACHE="$(cargo_registry_cache "${REPLY}")"
+[[ -n "${RUST_FIXTURE_CACHE}" ]] || fail "rust doctor named no cargo registry cache directory"
+# <state>/caches/shared, derived rather than hardcoded so this follows
+# XDG_STATE_HOME wherever the run puts it.
+SHARED_CACHE_DIR="$(dirname "$(dirname "${RUST_FIXTURE_CACHE}")")/shared"
+
+# Same project contents at another path: the caches must not be the same
+# directories, or one workspace could read and rewrite another's dependency
+# sources.
+cp -R "${ROOT}/fixtures/rust-sample" "${CACHE_PROBE_DIR}/rust-sample"
+
+run_and_capture "Doctor JSON scopes caches to the workspace path" \
+  "${SPAWN_BIN}" doctor "${CACHE_PROBE_DIR}/rust-sample" --json
+REPLY="$(unescape_json_slashes "${REPLY}")"
+PROBE_CACHE="$(cargo_registry_cache "${REPLY}")"
+[[ -n "${PROBE_CACHE}" ]] || fail "probe doctor named no cargo registry cache directory"
+[[ "${PROBE_CACHE}" != "${RUST_FIXTURE_CACHE}" ]] \
+  || fail "two workspaces were handed the same cache directory ${PROBE_CACHE}"
+
+# A repo cannot widen its own cache reach: only '--cache shared' may do that.
+printf '[workspace]\ncache = "shared"\n\n[toolchain]\nbase = "rust"\n' \
+  >"${CACHE_PROBE_DIR}/rust-sample/.spawn.toml"
+run_and_capture "Doctor JSON ignores a repo-configured shared cache" \
+  "${SPAWN_BIN}" doctor "${CACHE_PROBE_DIR}/rust-sample" --json
+REPLY="$(unescape_json_slashes "${REPLY}")"
+expect_regex "${REPLY}" 'rust \[workspace scope\]' "repo-configured sharing must not change the scope"
+expect_not_regex "${REPLY}" '/caches/shared/' "repo-configured sharing must not name the shared cache"
+expect_regex "${REPLY}" 'cache=shared ignored' "doctor must report the ignored cache scope"
+
+# Doctor and launch must agree. This uses the hostile repo config above and
+# inspects the actual container argv, so a warning disconnected from the
+# mounted directories cannot satisfy the check.
+run_and_capture "Run ignores a repo-configured shared cache" \
+  "${SPAWN_BIN}" -C "${CACHE_PROBE_DIR}/rust-sample" --verbose -- true
+expect_contains "${REPLY}" "ignoring .spawn.toml cache=shared" "run must warn about repo-configured sharing"
+expect_regex "${REPLY}" \
+  "--volume ${PROBE_CACHE}:/opt/rust/cargo/registry" "hostile repo must mount its private cache"
+expect_not_regex "${REPLY}" \
+  '--volume [^ ]*/caches/shared/' "hostile repo must not mount the shared cache"
 
 run_and_capture "Rust fixture: cwd default + passthrough command" \
   /bin/bash -lc "cd \"${ROOT}/fixtures/rust-sample\" && \"${SPAWN_BIN}\" -- cargo test"
 expect_contains "${REPLY}" "session: command (cargo, 1 arg)" "rust passthrough launch summary"
+
+# The real argv, not doctor's report of it: --verbose logs the container command
+# spawn execs, so this is the only check that proves what a run actually mounts.
+run_and_capture "Rust fixture: run argv mounts workspace-scoped caches" \
+  /bin/bash -lc "cd \"${ROOT}/fixtures/rust-sample\" && \"${SPAWN_BIN}\" --verbose -- true"
+expect_regex "${REPLY}" \
+  "--volume ${RUST_FIXTURE_CACHE}:/opt/rust/cargo/registry" "run must mount this workspace's cargo registry cache"
+expect_not_regex "${REPLY}" \
+  '--volume [^ ]*/caches/shared/' "a default run must not mount the shared cache"
+expect_not_regex "${REPLY}" \
+  "--volume ${PROBE_CACHE}:" "a run must not mount another workspace's cache directory"
+# The mount is only real if the host directory is: spawn creates it before the
+# launch, and the guest writes into it.
+[[ -d "${RUST_FIXTURE_CACHE}" ]] \
+  || fail "spawn mounted ${RUST_FIXTURE_CACHE} without creating it on the host"
+
+# Custom images have unknown layouts, even if the chosen name happens to be a
+# locally built spawn image. The run argv must contain no build-cache mount.
+run_and_capture "Rust fixture: --image override mounts no build caches" \
+  "${SPAWN_BIN}" -C "${ROOT}/fixtures/rust-sample" --image spawn-rust:latest --verbose -- true
+expect_not_regex "${REPLY}" \
+  '--volume [^ ]*/caches/' "--image must disable build-cache mounts"
+
+# The flag is the only way to reach the shared cache, and it must still work.
+run_and_capture "Rust fixture: --cache shared mounts the shared caches" \
+  /bin/bash -lc "cd \"${ROOT}/fixtures/rust-sample\" && \"${SPAWN_BIN}\" --verbose --cache shared -- true"
+expect_regex "${REPLY}" \
+  "--volume ${SHARED_CACHE_DIR}/cargo-registry:/opt/rust/cargo/registry" "--cache shared must mount the shared cache"
+expect_contains "${REPLY}" "readable and writable" "--cache shared must warn about the sharing"
+expect_not_regex "${REPLY}" \
+  "--volume ${RUST_FIXTURE_CACHE}:" "--cache shared must not also mount the private cache"
+[[ -d "${SHARED_CACHE_DIR}/cargo-registry" ]] \
+  || fail "spawn mounted ${SHARED_CACHE_DIR}/cargo-registry without creating it on the host"
+
+# Every toolchain that declares caches, driven from its own run argv. The counts
+# are the one hand-written thing here, and they fail safe: adding or removing a
+# cache trips this before any assertion below it can pass vacuously.
+check_cache_mount_parents "rust" 2 "${SPAWN_BIN}" -C "${ROOT}/fixtures/rust-sample"
+check_cache_mount_parents "go" 1 "${SPAWN_BIN}" -C "${ROOT}/fixtures/go-sample"
+check_cache_mount_parents "js" 2 "${SPAWN_BIN}" -C "${ROOT}/fixtures/node-sample" --runtime spawn
 
 run_and_capture "Go fixture: explicit workspace + access profile" \
   "${SPAWN_BIN}" -C "${ROOT}/fixtures/go-sample" --access minimal -- /bin/bash -lc \
@@ -147,5 +379,51 @@ run_and_capture "Doctor JSON reports devcontainer workspace-image cache" \
   "${SPAWN_BIN}" doctor "${ROOT}/fixtures/devcontainer-sample" --json
 expect_regex "${REPLY}" '"source"[[:space:]]*:[[:space:]]*"devcontainer-dockerfile"' "devcontainer doctor source"
 expect_regex "${REPLY}" '"cacheStatus"[[:space:]]*:[[:space:]]*"ready"' "devcontainer doctor cache"
+
+section "Toolchain images keep /home/coder identical to base"
+# The invariant this slice exists to establish: a toolchain image must not add
+# anything to /home/coder. If this fails, a toolchain is leaking into the home,
+# which mixes build state with user state and makes the home expensive to copy.
+#
+# Compare sorted listings of every entry plus the content of every file, not
+# file counts: the base home is built largely from symlinks (.claude.json,
+# .gitconfig) and directories (.claude-state, .gitconfig-dir, .local/bin), so
+# counting only `-type f` would wave through a compatibility symlink such as
+# `ln -s /opt/rust/cargo /home/coder/.cargo`, a directory-only leak, or a
+# one-added-one-removed swap.
+#
+# The listing carries type, mode, numeric owner/group, and symlink target
+# (`%y %m %U %G %l`) as well as the path, so permission/ownership changes and a
+# retargeted symlink are caught even though `.claude.json` is dangling and thus
+# invisible to `-type f`; the md5sums catch a same-path content change, such as
+# a `.bashrc` that regained the bun/deno installer's `export` lines because the
+# `/etc/skel` restore moved above the installers. `find -printf` is GNU find,
+# which is what these Ubuntu images ship — this runs inside the container.
+home_listing() {
+  "${CONTAINER_BIN}" run --rm "$1" /bin/sh -c '
+    find /home/coder -mindepth 1 -printf "%p %y %m %U %G %l\n" | LC_ALL=C sort
+    find /home/coder -type f -exec md5sum {} + | LC_ALL=C sort
+  '
+}
+
+base_home_listing="$(home_listing spawn-base:latest)"
+[[ -n "${base_home_listing}" ]] \
+  || fail "could not list /home/coder in spawn-base:latest (empty listing)"
+
+for toolchain in cpp rust go js; do
+  toolchain_home_listing="$(home_listing "spawn-${toolchain}:latest")"
+  [[ -n "${toolchain_home_listing}" ]] \
+    || fail "could not list /home/coder in spawn-${toolchain}:latest (empty listing)"
+
+  if [[ "${toolchain_home_listing}" != "${base_home_listing}" ]]; then
+    printf 'differences under /home/coder ("<" only in spawn-%s, ">" only in spawn-base):\n' "${toolchain}" >&2
+    diff <(printf '%s\n' "${toolchain_home_listing}") <(printf '%s\n' "${base_home_listing}") >&2 || true
+    fail "spawn-${toolchain} does not keep /home/coder identical to spawn-base: toolchains must live under /opt, not in the home — or, if the differences are only timestamped names (.claude/backups, .npm/_logs), the images were built from different spawn-base layers, so rebuild all images with 'spawn build'"
+  fi
+done
+# Entry lines start with the path; md5sum lines start with a hash, so counting
+# the former reports entries rather than entries-plus-checksums.
+printf 'PASS: all toolchain images keep /home/coder identical to base (%s entries, contents included)\n\n' \
+  "$(printf '%s\n' "${base_home_listing}" | grep -c '^/home/coder' | tr -d '[:space:]')"
 
 printf '=== All smoke tests passed ===\n'

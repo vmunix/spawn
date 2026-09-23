@@ -39,7 +39,10 @@ Always run `make test` before `git commit` or `git push`.
 
 ## Product Shape
 
-`spawn` is a Swift CLI that wraps Apple's `container` CLI to run coding agents and arbitrary commands in macOS-hosted Linux containers.
+`spawn` is a Swift CLI that runs coding agents and arbitrary commands in
+macOS-hosted Linux containers. Apple's `container` CLI is the stable launch
+backend; direct Containerization-library launches are experimental and
+explicitly selected.
 
 Current front-door UX:
 
@@ -50,11 +53,13 @@ Current front-door UX:
 - `spawn --shell` opens a shell
 - `spawn doctor` checks the local environment and workspace resolution
 - `spawn doctor --json` emits the same information in machine-readable form
+- `spawn cache clean --native` resets the current experimental native cache when no native launch is active
 
 Important runtime controls:
 
 - `--access minimal|git|trusted`
 - `--runtime auto|spawn|workspace-image`
+- `--backend cli|native-experimental` (`cli` is the default)
 - `--rebuild-workspace-image` only with `--runtime workspace-image`
 - `.spawn.toml` may define `[workspace] agent/access` and `[toolchain] base`
 
@@ -72,7 +77,10 @@ RunCommand.run()
     or ImageResolver.resolve()           # when using spawn-managed runtimes
   → MountResolver.resolve()              # workspace, auth, agent state
   → EnvLoader.load/loadDefault()         # env file / defaults
-  → ContainerRunner.run()                # execv for TTY, Process otherwise
+  → ResolvedLaunchPlan.workspace()       # one backend-neutral launch value
+  → ContainerRuntime.launch(plan)        # semantic launch boundary
+    → AppleContainerCLIRuntime            # default: execv for TTY, Process otherwise
+    or NativeContainerRuntime                # explicit experimental library backend
 ```
 
 Toolchain detection priority:
@@ -112,17 +120,39 @@ Access profiles and action permissions are separate concerns.
 - `trusted` additionally mounts copied SSH material
 - safe mode remains the default
 - `--yolo` disables permission gates
+- build caches are scoped to the workspace by default, so no profile leaks one workspace's cached dependency sources into another
 
 Do not broaden default secret exposure casually. The current direction is explicit, opt-in host auth exposure.
 
+## Build Cache Scope
+
+Build caches are host directories under `<state>/caches/<scope-key>/<cache>`, bind-mounted read-write. They hold dependency sources fetched with the workspace's own credentials (`cargo`'s git cache can hold private repositories), so the scope key carries workspace identity by default.
+
+- `workspace` (default): the key is `WorkspaceIdentity.key(for:)` — the same slug-plus-path-hash that names a workspace-image — so two workspaces never share a directory
+- `shared`: one `shared` directory for every workspace that opts in
+- only `--cache shared` may select `shared`; `.spawn.toml [workspace] cache = "shared"` is ignored with a warning, exactly as a repo-supplied `access` elevation is. Repo config may narrow (`cache = "workspace"`), never widen
+- a shared cache is readable and writable by every workspace using it; a run that uses one says so
+
+`spawn doctor` must name the directories the workspace would actually mount, resolving the scope the way a run does. Anything that names a cache path goes through `CacheMounts`, never by string-building a path.
+
 ## Important Design Constraints
 
-- All container interaction goes through `ContainerRunner`
-- `ContainerRunner.buildArgs()` is pure and heavily tested
+- Workspace launches cross `ContainerRuntime` as a `ResolvedLaunchPlan`; CLI arguments and process details stay in runtime adapters
+- Raw operational `container` CLI commands remain in `ContainerRunner` and are intentionally outside `ContainerRuntime`
+- `NativeContainerRuntime` owns its image/initfs/rootfs cache under `<state>/native-runtime/containerization-<version>`; versioning prevents reuse of a stale initfs after a library upgrade, and it never mutates the CLI service's image store directly
+- A native launch holds a shared lifecycle lock until its VM and launch clone are gone; `spawn cache clean --native` takes that lock exclusively, moves the current cache out of the live path, then removes it. Older cache layouts are reported but never removed automatically
+- `make build` signs the release binary with `spawn.entitlements`; direct Virtualization use requires `com.apple.security.virtualization`
+- `RunCommand` resolves one `ResolvedLaunchPlan`; runtime adapters consume it without re-reading CLI or workspace config
+- `AppleContainerCLIRuntime.buildArgs(for:)` is pure and heavily tested
 - Interactive TTY runs use `execv`; non-TTY runs use `Foundation.Process`
 - Agent auth state is persisted under `~/.local/state/spawn/<agent>/`
 - Single-file bind mounts are avoided where VirtioFS rename behavior is problematic
 - Embedded `ContainerfileTemplates.swift` keeps `spawn build` self-contained after installation
+- Language toolchains live under `/opt` (`/opt/rust`, `/opt/go`, `/opt/js`), never in `/home/coder`
+- Toolchain images must keep `/home/coder` identical to `spawn-base`'s; `scripts/smoke.sh` compares each image's full home listing — every entry with its type, mode, numeric owner/group, and symlink target, plus a checksum of every file — and fails if a toolchain leaks into the home or changes a file already there
+- Build caches are host directories bind-mounted at run time, never baked into an image (see `Sources/CacheMounts.swift`). They are not named `container` volumes: a volume is a raw ext4 image on a virtio block device, which `container` treats as exclusively owned, and concurrent runs sharing one fail with `VZErrorDomain Code=2`. A bind mount is served by VirtioFS, which maps ownership to the guest user — so preparing a cache is one `mkdir` plus a readiness check, with no chown, no rollback and no locking, and concurrent runs are safe
+- Cache directories are workspace-scoped unless the user opts into `--cache shared`; workspace identity comes from `WorkspaceIdentity`, which also names workspace-images — do not duplicate that derivation
+- `ContainerfileTemplates.swift` is the only source of Containerfile content; `spawn build` is the only supported way to build spawn-managed images
 
 ## Testing
 
@@ -131,7 +161,7 @@ Tests use Swift 6's `Testing` framework, not XCTest.
 - Use `@Test` and `#expect`
 - `Tests/TestHelpers.swift` provides `makeTempDir(files:)`
 - `make test` prefers Xcode when available because CLT Swift can be incomplete for this setup
-- `make smoke` exercises the front-door CLI across the fixture workspaces under `fixtures/`, including `doctor --json` and workspace-image runtimes
+- `make smoke` exercises the front-door CLI across the fixture workspaces under `fixtures/`, including one native library launch, `doctor --json`, and workspace-image runtimes
 
 Favor pure-function tests when possible:
 
@@ -140,6 +170,20 @@ Favor pure-function tests when possible:
 - mount/env construction
 - doctor reporting and JSON rendering
 - workspace-image cache decisions
+
+### Prove a test can fail
+
+Before claiming coverage, break the implementation, verify the intended test
+fails, then restore it and verify it passes. Report both results.
+
+- Assert structured or exact behavior, not substrings that may also occur in comments
+- Compare identities when identity matters; counts alone miss substitutions
+- Pair negative assertions with a positive premise so they cannot pass vacuously
+- Isolate each clause of a compound guard with a discriminating test input
+- Test the final composition handed across a boundary, not only its components
+- Pass `--` before shell patterns that may begin with `-`
+- Under `pipefail`, verify the command that establishes the premise, not a later consumer
+- Unescape `doctor --json` slashes before matching host paths in smoke tests
 
 ## Module Map
 
@@ -150,10 +194,17 @@ Key files:
 - `Sources/WorkspaceImageRuntime.swift`: workspace-image planning, cache status, rebuild logic
 - `Sources/ToolchainDetector.swift`: detection and `.spawn.toml` loading
 - `Sources/MountResolver.swift`: workspace/auth/agent mounts
-- `Sources/ContainerRunner.swift`: container CLI boundary
+- `Sources/ResolvedLaunchPlan.swift`: backend-neutral final image, mounts, environment, command, and resources
+- `Sources/ContainerRuntime.swift`: semantic workspace-launch boundary
+- `Sources/AppleContainerCLIRuntime.swift`: `container run` adapter and execution behavior
+- `Sources/NativeContainerRuntime.swift`: experimental Containerization adapter and spawn-owned artifacts
+- `Sources/NativeCacheStore.swift`: native cache inspection, lifecycle lock, and current-version cleanup
+- `Sources/ContainerRunner.swift`: `container` CLI discovery, preflight, and raw operational commands
 - `Sources/BuildCommand.swift`: spawn-managed image builds
+- `Sources/CacheMounts.swift`: per-toolchain build-cache host paths, scope, guest paths, and directory creation
+- `Sources/WorkspaceIdentity.swift`: the slug-plus-path-hash key shared by workspace-image names and workspace-scoped caches
 - `Sources/DevcontainerParser.swift`: devcontainer parsing
-- `Sources/Types.swift`: `Toolchain`, `AccessProfile`, `RuntimeMode`, `AgentProfile`, `Mount`
+- `Sources/Types.swift`: `Toolchain`, `AccessProfile`, `CacheScope`, `RuntimeMode`, `AgentProfile`, `Mount`
 
 ## Coding Conventions
 

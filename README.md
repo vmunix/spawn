@@ -31,7 +31,10 @@ being limited to a shell wrapper forever.
 
 ## What it does
 
-`spawn` wraps Apple's [`container`](https://github.com/apple/containerization) CLI to launch AI coding agents in lightweight Linux VMs.
+`spawn` launches AI coding agents in lightweight Linux VMs. Apple's
+[`container`](https://github.com/apple/containerization) CLI is the stable
+default backend; an explicit experimental backend exercises Apple's
+Containerization library directly.
 
 - **Auto-detects toolchains** — Rust, Go, C++, and JS/TS projects (Node, Bun, Deno), or falls back to a base image
 - **Safe mode by default** — prompts before `git push`, PR creation, and other remote-write operations
@@ -121,6 +124,7 @@ Use `spawn -- <command...>` for passthrough commands. `spawn cargo test` is reje
 | `--shell` | Drop into a shell instead of running an agent |
 | `-C, --cwd <dir>` | Directory to mount as workspace (default: current directory) |
 | `--runtime <name>` | Runtime mode: `auto`, `spawn`, `workspace-image` |
+| `--backend <name>` | Launch backend: `cli` (default), `native-experimental` |
 | `--rebuild-workspace-image` | Force a rebuild when using `--runtime workspace-image` |
 | `--access <name>` | Host access profile: `minimal`, `git`, `trusted` |
 | `--toolchain <name>` | Override auto-detected toolchain: `base`, `cpp`, `rust`, `go`, `js` |
@@ -155,6 +159,20 @@ Runtime mode controls how spawn reacts when a workspace defines its own runtime:
 `workspace-image` reuses a cached workspace image when the tracked Dockerfile, optional `.dockerignore`, devcontainer config, and non-ignored build-context file contents and permissions have not changed.
 Use `--rebuild-workspace-image` with `--runtime workspace-image` when you want to bypass the cache explicitly.
 
+`spawn doctor` reports the experimental native backend's artifact paths and
+approximate allocated size. `spawn cache clean --native` removes only the
+current native backend cache after active native launches exit; the next launch
+rebuilds it. Workspace build caches and older native cache layouts are untouched.
+
+Launch backend is separate from runtime mode. `--backend cli` preserves the
+existing `container run` path. `--backend native-experimental` launches new
+workspace containers through the Containerization library, including
+`spawn --shell`; it never silently falls back to the CLI. Existing-container
+operations (`spawn exec`, `spawn shell <id>`, `spawn list`, and `spawn stop`),
+image builds, and doctor probes remain CLI-backed. See
+[Native Containerization Backend](docs/native-backend.md) for its artifact
+ownership, limitations, and cleanup model.
+
 If your repo has a root `Dockerfile` / `Containerfile`, or a `.devcontainer/devcontainer.json` with `build.dockerfile`, spawn currently requires an explicit choice:
 
 ```bash
@@ -175,6 +193,55 @@ Omit the toolchain to build all images. Base is built first since other images d
 |--------|-------------|
 | `--cpus <n>` | CPU cores for the builder container (default: 4) |
 | `--memory <size>` | Builder container memory (default: 8g) |
+
+Language toolchains are installed under `/opt` (`/opt/rust`, `/opt/go`, `/opt/js`), never in the container's `/home/coder`. The home holds user state only.
+
+> **Upgrading:** toolchains moved out of `/home/coder` into `/opt`, and the build caches mount at the new `/opt` paths. spawn cannot detect an image built before the move, so rebuild every image once with `spawn build`. Without the rebuild nothing fails loudly: spawn still creates and mounts the cache directories and `spawn doctor` still lists them, but a stale image writes to the old in-home paths, so the caches stay empty — and a stale `spawn-go:latest`, which never set `GOPATH`, does not persist its module cache at all. If you hardcoded `/home/coder/.cargo` or `/home/coder/go` in a script or `.spawn.toml`, update those paths to `/opt/rust/cargo` and `/opt/go`.
+
+### Build caches
+
+Build caches persist automatically in host directories under spawn's state directory, bind-mounted at run time, so downloads survive between runs without being baked into the image:
+
+| Toolchain | Host directory (default, per workspace) | Guest path |
+|-----------|-----------------------------------------|------------|
+| `rust` | `caches/<workspace>/cargo-registry`, `caches/<workspace>/cargo-git` | `/opt/rust/cargo/registry`, `/opt/rust/cargo/git` |
+| `go` | `caches/<workspace>/go-mod` | `/opt/go/pkg/mod` |
+| `js` | `caches/<workspace>/deno`, `caches/<workspace>/npm` | `/opt/js/deno-cache`, `/home/coder/.npm` |
+| `base`, `cpp` | *(none)* | |
+
+They live under `$XDG_STATE_HOME/spawn/caches` (`~/.local/state/spawn/caches` by default). Caches are **per workspace by default**. `<workspace>` is a slug plus a hash of the workspace path, so each project gets its own directories and no workspace can read or rewrite another's cached dependency sources. spawn creates them on demand -- a `mkdir`, no container and no ownership fixup, because VirtioFS maps the mount to the guest user. `spawn doctor` lists the directories for the detected toolchain, including the scope in use.
+
+Concurrent runs are safe: any number of runs may mount the same cache directory at once.
+
+To trade workspace isolation for reuse, opt in with the flag:
+
+```bash
+spawn --cache shared            # this run uses caches/shared/...
+```
+
+**Only the flag can select `shared`.** A repo's `.spawn.toml` cannot: `cache = "shared"` there is ignored with a warning, and the run stays workspace-scoped. Repo config may narrow (`cache = "workspace"`) but never widen — the same rule that applies to `access`, because a repo you cloned should not be able to reach the caches you share elsewhere.
+
+A shared cache is one set of directories (`caches/shared/cargo-registry`, etc.) mounted read-write into every workspace that opts in: each of them can read everything the others cached — including private dependency sources fetched by `cargo` into its git cache — and can modify what the others will build against next. Do not use `--cache shared` for untrusted repositories, or alongside workspaces with private dependencies.
+
+There is no `spawn cache` command; a cache is a directory, so delete it and the next run recreates it empty:
+
+```bash
+ls ~/.local/state/spawn/caches
+rm -rf ~/.local/state/spawn/caches/myproject-1a2b3c4d5e6f7890
+```
+
+> **Upgrading:** caches used to be named `container` volumes. Nothing reads those now, so delete them once — each is a 512 GB sparse disk image, so this is also what reclaims the space:
+>
+> ```bash
+> container volume ls | grep spawn-cache-
+> container volume delete spawn-cache-cargo-registry
+> container volume delete spawn-cache-cargo-git
+> container volume delete spawn-cache-go-mod
+> container volume delete spawn-cache-deno
+> container volume delete spawn-cache-npm
+> ```
+>
+> Per-workspace volumes are named `spawn-cache-<cache>-<slug>-<hash>` and are deleted the same way. Contents are not migrated: the first run in each workspace repopulates the new host directory from scratch. See [docs/toolchains.md](docs/toolchains.md#build-caches) for why the mechanism changed.
 
 ### Managing containers
 
@@ -229,9 +296,10 @@ base = "rust"
 Valid values:
 
 - `workspace.agent`: `claude-code`, `codex`
+- `workspace.cache`: `workspace` (default, caches private to this workspace); `shared` is ignored here — it requires `--cache shared`
 - `toolchain.base`: `base`, `cpp`, `rust`, `go`, `js`
 
-Repo config can set the default agent and toolchain preference. Host access still requires an explicit `--access ...` at launch time, even if `.spawn.toml` contains an `access` value.
+Repo config can set the default agent and toolchain preference. Host access still requires an explicit `--access ...` at launch time, even if `.spawn.toml` contains an `access` value, and cross-workspace cache sharing likewise requires an explicit `--cache shared`.
 
 spawn also reads `.devcontainer/devcontainer.json` to infer toolchains from images and features. If a viable devcontainer config is present, spawn prefers that explicit signal over repo-file heuristics. This makes existing VS Code devcontainer projects work with zero extra setup.
 

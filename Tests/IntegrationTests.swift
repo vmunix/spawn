@@ -21,15 +21,16 @@ import Testing
     #expect(mounts[0].guestPath.hasPrefix("/workspace/"))
 
     // Build args
-    let args = ContainerRunner.buildArgs(
-        image: image,
-        mounts: mounts,
-        env: [:],
-        workdir: "/workspace/\(target.lastPathComponent)",
-        entrypoint: AgentProfile.claudeCode.yoloEntrypoint,
-        cpus: 4,
-        memory: "8g"
-    )
+    let args = AppleContainerCLIRuntime.buildArgs(
+        for: makeLaunchPlan(
+            image: image,
+            mounts: mounts,
+            env: [:],
+            workdir: "/workspace/\(target.lastPathComponent)",
+            entrypoint: AgentProfile.claudeCode.yoloEntrypoint,
+            cpus: 4,
+            memory: "8g"
+        ))
 
     #expect(args.first == "run")
     #expect(args.contains("spawn-rust:latest"))
@@ -46,15 +47,16 @@ import Testing
     let image = try ImageResolver.resolve(toolchain: toolchain ?? .base, imageOverride: nil)
     #expect(image == "spawn-go:latest")
 
-    let args = ContainerRunner.buildArgs(
-        image: image,
-        mounts: [Mount(hostPath: target.path, readOnly: false)],
-        env: [:],
-        workdir: "/workspace/\(target.lastPathComponent)",
-        entrypoint: AgentProfile.codex.yoloEntrypoint,
-        cpus: 2,
-        memory: "4g"
-    )
+    let args = AppleContainerCLIRuntime.buildArgs(
+        for: makeLaunchPlan(
+            image: image,
+            mounts: [Mount(hostPath: target.path, readOnly: false)],
+            env: [:],
+            workdir: "/workspace/\(target.lastPathComponent)",
+            entrypoint: AgentProfile.codex.yoloEntrypoint,
+            cpus: 2,
+            memory: "4g"
+        ))
 
     #expect(args.contains("spawn-go:latest"))
     #expect(args.contains("codex"))
@@ -70,15 +72,16 @@ import Testing
     let image = try ImageResolver.resolve(toolchain: toolchain ?? .base, imageOverride: nil)
     #expect(image == "spawn-js:latest")
 
-    let args = ContainerRunner.buildArgs(
-        image: image,
-        mounts: [Mount(hostPath: target.path, readOnly: false)],
-        env: [:],
-        workdir: "/workspace/\(target.lastPathComponent)",
-        entrypoint: AgentProfile.claudeCode.safeEntrypoint,
-        cpus: 2,
-        memory: "4g"
-    )
+    let args = AppleContainerCLIRuntime.buildArgs(
+        for: makeLaunchPlan(
+            image: image,
+            mounts: [Mount(hostPath: target.path, readOnly: false)],
+            env: [:],
+            workdir: "/workspace/\(target.lastPathComponent)",
+            entrypoint: AgentProfile.claudeCode.safeEntrypoint,
+            cpus: 2,
+            memory: "4g"
+        ))
 
     #expect(args.contains("spawn-js:latest"))
     #expect(args.contains("claude"))
@@ -105,15 +108,16 @@ import Testing
         stateDir: stateDir,
         homeDirectory: home
     )
-    let args = ContainerRunner.buildArgs(
-        image: "spawn-rust:latest",
-        mounts: mounts,
-        env: [:],
-        workdir: "/workspace/\(target.lastPathComponent)",
-        entrypoint: AgentProfile.claudeCode.safeEntrypoint,
-        cpus: 4,
-        memory: "8g"
-    )
+    let args = AppleContainerCLIRuntime.buildArgs(
+        for: makeLaunchPlan(
+            image: "spawn-rust:latest",
+            mounts: mounts,
+            env: [:],
+            workdir: "/workspace/\(target.lastPathComponent)",
+            entrypoint: AgentProfile.claudeCode.safeEntrypoint,
+            cpus: 4,
+            memory: "8g"
+        ))
 
     #expect(args.contains("--volume"))
     #expect(args.contains("\(stateDir.appendingPathComponent("git").path):/home/coder/.gitconfig-dir:ro"))

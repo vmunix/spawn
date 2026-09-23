@@ -11,8 +11,17 @@ import Testing
     #expect(help.contains("spawn -- cargo test"))
     #expect(help.contains("Runtime selection:"))
     #expect(help.contains("--runtime workspace-image"))
+    #expect(help.contains("--backend native-experimental"))
+    #expect(help.contains("spawn cache clean --native"))
     #expect(help.contains("Workspace defaults:"))
-    #expect(help.contains(".spawn.toml [workspace]   Default agent; access still requires --access"))
+    #expect(help.contains(".spawn.toml [workspace]   Default agent; access and cache sharing require flags"))
+    // Every run option a user is likely to reach for must be discoverable from
+    // the front door, not only from `spawn help run`.
+    #expect(help.contains("Common run options:"))
+    for option in ["--yolo", "--access", "--cache", "--shell", "--toolchain"] {
+        #expect(help.contains(option), "root help no longer lists \(option)")
+    }
+    #expect(help.contains("--cache <scope>"))
     #expect(help.contains("Bare invocations and run-style options route to `spawn run`."))
     #expect(help.contains("Use `spawn -- <command...>` for passthrough workspace commands."))
     #expect(help.contains("spawn help run"))
@@ -25,8 +34,15 @@ import Testing
     #expect(help.contains("--access minimal"))
     #expect(help.contains("--runtime workspace-image"))
     #expect(help.contains("--rebuild-workspace-image"))
-    #expect(help.contains(".spawn.toml [workspace]        Default agent; access still requires --access"))
+    #expect(help.contains("--backend cli"))
+    #expect(help.contains("--backend native-experimental"))
+    #expect(help.contains(".spawn.toml [workspace]        Default agent; access and cache sharing require flags"))
     #expect(help.contains("Safe mode is the default."))
+    // Both scopes must be discoverable from help: the default is the safe one,
+    // and a user cannot opt into sharing they were never told about.
+    for scope in CacheScope.allCases {
+        #expect(help.contains("--cache \(scope.rawValue)"))
+    }
 }
 
 @Test func doctorHelpExplainsHumanAndJSONOutputs() {
@@ -38,7 +54,16 @@ import Testing
     #expect(help.contains("default kernel and Rosetta readiness"))
     #expect(help.contains("workspace.defaults"))
     #expect(help.contains("workspace.runtime"))
+    #expect(help.contains("nativeCache"))
     #expect(help.contains("-C, --cwd"))
+}
+
+@Test func cacheHelpExplainsExplicitNativeCleanupScope() {
+    let help = Spawn.helpMessage(for: Spawn.Cache.Clean.self, columns: 100)
+    #expect(help.contains("spawn cache clean --native"))
+    #expect(help.contains("--dry-run"))
+    #expect(help.contains("older native cache"))
+    #expect(help.contains("while a native launch is active"))
 }
 
 @Test func imageAndBuildHelpExplainManagedImageScope() {

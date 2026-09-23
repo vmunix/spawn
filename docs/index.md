@@ -76,7 +76,10 @@ spawn doctor
 
 ## What it does
 
-`spawn` wraps Apple's [`container`](https://github.com/apple/containerization) CLI to launch AI coding agents in lightweight Linux VMs.
+`spawn` launches AI coding agents in lightweight Linux VMs. Apple's
+[`container`](https://github.com/apple/containerization) CLI is the stable
+default backend, with an explicit experimental backend for launching through
+Apple's Containerization library directly.
 
 - **Auto-detects your project's toolchain** (C++, Rust, Go, JS/TS) and picks the right container image
 - **Safe mode by default** -- prompts before `git push`, PR creation, and other remote-write operations

@@ -55,7 +55,8 @@ import Testing
     let workspaceConfig = WorkspaceConfig(
         toolchainName: nil,
         agentName: "codex",
-        accessName: "trusted"
+        accessName: "trusted",
+        cacheName: nil
     )
 
     #expect(
@@ -70,7 +71,8 @@ import Testing
     let workspaceConfig = WorkspaceConfig(
         toolchainName: nil,
         agentName: "codex",
-        accessName: "trusted"
+        accessName: "trusted",
+        cacheName: nil
     )
 
     #expect(
@@ -315,4 +317,489 @@ import Testing
     )
 
     #expect(lines.contains("  toolchain: go (--toolchain override)"))
+}
+
+// MARK: - Cache scope precedence
+//
+// Sharing a build cache is a cross-workspace read-write channel, so the default
+// is the private scope and only an explicit flag may widen it — the rule
+// `access` already follows. These tests parse the real command and resolve from
+// its stored properties, so disconnecting a flag at the launch boundary fails.
+
+private func parsedRun(_ arguments: [String]) throws -> Spawn.Run {
+    let command = try Spawn.Run.parseAsRoot(arguments)
+    return try #require(command as? Spawn.Run)
+}
+
+/// Cache root for the resolution tests. Passed explicitly so they never derive
+/// a path from the real state directory.
+private let runCacheRoot = URL(fileURLWithPath: "/state/spawn/caches")
+
+private final class RecordingContainerRuntime: ContainerRuntime, @unchecked Sendable {
+    private let lock = NSLock()
+    private var recordedPlans: [ResolvedLaunchPlan] = []
+    let status: Int32
+
+    init(status: Int32 = 0) {
+        self.status = status
+    }
+
+    func launch(_ plan: ResolvedLaunchPlan) async throws -> Int32 {
+        lock.withLock {
+            recordedPlans.append(plan)
+        }
+        return status
+    }
+
+    var plans: [ResolvedLaunchPlan] {
+        lock.withLock { recordedPlans }
+    }
+}
+
+private final class RecordingContainerRuntimeFactory: ContainerRuntimeFactory, @unchecked Sendable {
+    private let lock = NSLock()
+    private var recordedBackends: [ContainerBackend] = []
+    private var recordedStateDirectories: [URL] = []
+    let runtime: RecordingContainerRuntime
+
+    init(runtime: RecordingContainerRuntime = RecordingContainerRuntime()) {
+        self.runtime = runtime
+    }
+
+    func makeRuntime(
+        for backend: ContainerBackend,
+        stateDir: URL
+    ) throws -> any ContainerRuntime {
+        lock.withLock {
+            recordedBackends.append(backend)
+            recordedStateDirectories.append(stateDir)
+        }
+        return runtime
+    }
+
+    var backends: [ContainerBackend] {
+        lock.withLock { recordedBackends }
+    }
+
+    var stateDirectories: [URL] {
+        lock.withLock { recordedStateDirectories }
+    }
+}
+
+@Test func cacheScopeDefaultsToTheWorkspacePrivateScope() throws {
+    let selection = try parsedRun([]).resolvedCacheSelection(workspaceConfig: nil)
+    #expect(selection.scope == .workspace)
+    #expect(selection.ignoredConfiguredScope == nil)
+
+    let configWithoutCache = WorkspaceConfig(
+        toolchainName: nil,
+        agentName: "codex",
+        accessName: "git",
+        cacheName: nil
+    )
+    #expect(try parsedRun([]).resolvedCacheSelection(workspaceConfig: configWithoutCache).scope == .workspace)
+}
+
+@Test func parsedRunIgnoresRepoConfiguredSharingAndMountsPrivateCaches() throws {
+    // The security rule: a repo cannot widen its own cache reach. A cloned
+    // workspace that sets cache = "shared" would otherwise reach the caches a
+    // user had opted into sharing elsewhere.
+    let workspace = try makeTempDir(files: [:])
+    let config = WorkspaceConfig(toolchainName: nil, agentName: nil, accessName: nil, cacheName: "shared")
+    let selection = try parsedRun([]).resolvedCacheSelection(workspaceConfig: config)
+    let caches = selection.mounts(toolchain: .rust, workspace: workspace, root: runCacheRoot)
+
+    #expect(selection.scope == .workspace)
+    #expect(selection.ignoredConfiguredScope == .shared)
+    #expect(caches == CacheMounts.forToolchain(.rust, scope: .workspace, workspace: workspace, root: runCacheRoot))
+    #expect(!caches.isEmpty)
+    #expect(!caches.contains { $0.hostPath.hasPrefix(runCacheRoot.path + "/shared/") })
+}
+
+@Test func parsedCacheFlagIsTheOnlyWayToSelectSharedCaches() throws {
+    // The other half of the rule: the flag must actually work, or opting in
+    // would be impossible and the option decorative.
+    let workspace = try makeTempDir(files: [:])
+    let privateConfig = WorkspaceConfig(toolchainName: nil, agentName: nil, accessName: nil, cacheName: "workspace")
+    let selection = try parsedRun(["--cache", "shared"]).resolvedCacheSelection(workspaceConfig: privateConfig)
+    let caches = selection.mounts(toolchain: .rust, workspace: workspace, root: runCacheRoot)
+
+    #expect(selection.scope == .shared)
+    #expect(selection.ignoredConfiguredScope == nil)
+    #expect(caches == CacheMounts.forToolchain(.rust, scope: .shared, workspace: workspace, root: runCacheRoot))
+    #expect(caches.allSatisfy { $0.hostPath.hasPrefix(runCacheRoot.path + "/shared/") })
+}
+
+@Test func repoConfiguredNarrowingIsHonouredSilently() throws {
+    // cache = "workspace" asks for less, so it is kept and nothing is reported
+    // as ignored — the same asymmetry as access = "minimal".
+    let config = WorkspaceConfig(toolchainName: nil, agentName: nil, accessName: nil, cacheName: "workspace")
+    let selection = try parsedRun([]).resolvedCacheSelection(workspaceConfig: config)
+
+    #expect(selection.scope == .workspace)
+    #expect(selection.ignoredConfiguredScope == nil)
+}
+
+@Test func theFlagCanNarrowARepoThatAskedToShare() throws {
+    let sharedConfig = WorkspaceConfig(toolchainName: nil, agentName: nil, accessName: nil, cacheName: "shared")
+    let selection = try parsedRun(["--cache", "workspace"]).resolvedCacheSelection(workspaceConfig: sharedConfig)
+
+    #expect(selection.scope == .workspace)
+    #expect(selection.ignoredConfiguredScope == nil)
+}
+
+@Test func anUnusableCacheFlagIsRejectedRatherThanDefaulted() throws {
+    // A typo'd --cache must not silently run with a scope the user never asked
+    // for. A typo'd .spawn.toml value selects nothing, as an unknown access
+    // value does, and leaves the private default in place.
+    #expect(throws: ValidationError.self) {
+        try parsedRun(["--cache", "everyone"]).resolvedCacheSelection(workspaceConfig: nil)
+    }
+
+    let config = WorkspaceConfig(toolchainName: nil, agentName: nil, accessName: nil, cacheName: "everyone")
+    let selection = try parsedRun([]).resolvedCacheSelection(workspaceConfig: config)
+    #expect(selection.scope == .workspace)
+    #expect(selection.ignoredConfiguredScope == nil)
+}
+
+// MARK: - The caches a run actually mounts
+//
+// These resolve from a parsed `Spawn.Run`'s own stored properties, so a `--cache`
+// or `--image` flag disconnected from cache policy fails here. They cover
+// `resolvedCacheSelection` only. What the runtime is actually handed — the mounts
+// in the plan, and the notices printed beside them — is covered under "Typed
+// launch boundary" below, which exercises the single method `run()` calls.
+
+@Test func aRunMountsWorkspaceScopedCachesByDefault() throws {
+    let workspace = try makeTempDir(files: [:])
+    let selection = try parsedRun([]).resolvedCacheSelection(workspaceConfig: nil)
+    let caches = selection.mounts(toolchain: .rust, workspace: workspace, root: runCacheRoot)
+
+    #expect(caches == CacheMounts.forToolchain(.rust, scope: .workspace, workspace: workspace, root: runCacheRoot))
+    #expect(!caches.isEmpty)
+    // Not the shared directory, whatever the workspace is called.
+    #expect(!caches.contains { $0.hostPath.hasPrefix(runCacheRoot.path + "/shared/") })
+}
+
+@Test func aRunInAnotherWorkspaceMountsDifferentCaches() throws {
+    let left = try makeTempDir(files: [:])
+    let right = try makeTempDir(files: [:])
+
+    let selection = try parsedRun([]).resolvedCacheSelection(workspaceConfig: nil)
+    let leftCaches = selection.mounts(toolchain: .rust, workspace: left, root: runCacheRoot)
+    let rightCaches = selection.mounts(toolchain: .rust, workspace: right, root: runCacheRoot)
+
+    #expect(!leftCaches.isEmpty)
+    #expect(Set(leftCaches.map(\.hostPath)).isDisjoint(with: Set(rightCaches.map(\.hostPath))))
+}
+
+@Test func aRunWithAnImageOverrideMountsNoCaches() throws {
+    let workspace = try makeTempDir(files: [:])
+
+    for scope in CacheScope.allCases {
+        let run = try parsedRun(["--cache", scope.rawValue, "--image", "ghcr.io/foo/bar"])
+        let selection = try run.resolvedCacheSelection(workspaceConfig: nil)
+        #expect(selection.imageOverride == "ghcr.io/foo/bar")
+        #expect(selection.mounts(toolchain: .rust, workspace: workspace, root: runCacheRoot).isEmpty)
+    }
+}
+
+@Test func aRunWithAnUnusableCacheFlagMountsNothingAndFails() throws {
+    #expect(throws: ValidationError.self) {
+        try parsedRun(["--cache", "everyone"]).resolvedCacheSelection(workspaceConfig: nil)
+    }
+}
+
+// MARK: - Typed launch boundary
+//
+// `resolvedLaunch` is the whole of what `run()` composes: it resolves the cache
+// decision from the parsed command itself and returns both the plan the runtime
+// receives and the notices printed beside it. There is no cache scope for `run()`
+// to pass, so these tests cover the launch as the real command performs it.
+
+@Test func parsedRunExecutesItsResolvedPlanThroughTheInjectedRuntime() async throws {
+    let workspace = try makeTempDir(files: [:])
+    let imageStore = try makeTempDir(files: ["state.json": #"{"spawn-base:latest":{}}"#])
+    let stateDir = try makeTempDir(files: [:])
+    var run = try parsedRun([
+        "--agent",
+        "codex",
+        "-C",
+        workspace.path,
+        "--image",
+        "spawn-base:latest",
+        "--cpus",
+        "17",
+        "--memory",
+        "19g",
+        "--",
+        "/bin/echo",
+        "runtime-handoff-sentinel",
+    ])
+    let runtime = RecordingContainerRuntime()
+
+    try await run.run(using: runtime, imageStoreRoot: imageStore, stateDir: stateDir)
+
+    #expect(runtime.plans.count == 1)
+    let plan = try #require(runtime.plans.first)
+    #expect(plan.image == "spawn-base:latest")
+    #expect(plan.mounts.first == Mount(hostPath: workspace.path, readOnly: false))
+    #expect(plan.workdir == "/workspace/\(workspace.lastPathComponent)")
+    #expect(plan.entrypoint == ["/bin/echo", "runtime-handoff-sentinel"])
+    #expect(plan.resources == .init(cpus: 17, memory: "19g"))
+    #expect(plan.io.keepStandardInputOpen)
+    #expect(plan.removeOnExit)
+}
+
+@Test func parsedBackendSelectsTheRuntimeFactoryUsedForTheLaunch() async throws {
+    for (arguments, expectedBackend) in [
+        ([], ContainerBackend.cli),
+        (["--backend", "native-experimental"], ContainerBackend.nativeExperimental),
+    ] {
+        let workspace = try makeTempDir(files: [:])
+        let imageStore = try makeTempDir(files: ["state.json": #"{"spawn-base:latest":{}}"#])
+        let stateDir = try makeTempDir(files: [:])
+        var run = try parsedRun(
+            arguments + [
+                "--agent",
+                "codex",
+                "-C",
+                workspace.path,
+                "--image",
+                "spawn-base:latest",
+                "--",
+                "/usr/bin/true",
+            ]
+        )
+        let factory = RecordingContainerRuntimeFactory()
+
+        try await run.run(
+            using: factory,
+            imageStoreRoot: imageStore,
+            stateDir: stateDir
+        )
+
+        #expect(factory.backends == [expectedBackend])
+        #expect(factory.stateDirectories == [stateDir])
+        #expect(factory.runtime.plans.count == 1)
+    }
+}
+
+@Test func productionRuntimeFactoryMapsBothBackendCasesExactly() throws {
+    let stateDir = URL(fileURLWithPath: "/state/spawn")
+    let factory = ProductionContainerRuntimeFactory()
+
+    #expect(try factory.makeRuntime(for: .cli, stateDir: stateDir) is AppleContainerCLIRuntime)
+    #expect(
+        try factory.makeRuntime(
+            for: .nativeExperimental,
+            stateDir: stateDir
+        ) is NativeContainerRuntime
+    )
+}
+
+@Test func runCommandHandsItsExactResolvedPlanToTheInjectedRuntime() async throws {
+    let run = try parsedRun([])
+    let runtime = RecordingContainerRuntime()
+    let plan = makeLaunchPlan(
+        image: "mutation-sentinel:image",
+        mounts: [Mount(hostPath: "/mutation/host", guestPath: "/mutation/guest", readOnly: true)],
+        env: ["MUTATION_SENTINEL": "present"],
+        workdir: "/mutation/workdir",
+        entrypoint: ["mutation-entrypoint", "unique-argument"],
+        cpus: 17,
+        memory: "19g",
+        keepStandardInputOpen: false,
+        allocateTerminal: true,
+        removeOnExit: false
+    )
+    let launch = ResolvedLaunch(plan: plan, cacheNotices: ["not runtime input"])
+
+    try await run.executeLaunch(launch, using: runtime)
+
+    #expect(runtime.plans == [plan])
+}
+
+@Test func runCommandPreservesRuntimeExitStatus() async throws {
+    let run = try parsedRun([])
+    let runtime = RecordingContainerRuntime(status: 37)
+    let launch = ResolvedLaunch(
+        plan: makeLaunchPlan(
+            image: "spawn-base:latest",
+            mounts: [],
+            env: [:],
+            workdir: "/workspace/test",
+            entrypoint: ["false"],
+            cpus: 1,
+            memory: "1g"
+        ),
+        cacheNotices: []
+    )
+
+    await #expect(throws: ExitCode(37)) {
+        try await run.executeLaunch(launch, using: runtime)
+    }
+    #expect(runtime.plans == [launch.plan])
+}
+
+@Test func parsedRunResolvesThePlanHandedToTheRuntime() throws {
+    let run = try parsedRun(["--cpus", "6", "--memory", "12g"])
+    let workspaceURL = try makeTempDir(files: [:])
+    let cacheRoot = try makeTempDir(files: [:])
+    let workspace = Mount(hostPath: workspaceURL.path, readOnly: false)
+    let state = Mount(
+        hostPath: "/state/codex",
+        guestPath: "/home/coder/.codex",
+        readOnly: false
+    )
+    let expectedCaches = CacheMounts.forToolchain(
+        .rust,
+        scope: .workspace,
+        workspace: workspaceURL,
+        root: cacheRoot
+    )
+
+    let launch = try run.resolvedLaunch(
+        image: "spawn-rust:latest",
+        resolvedMounts: [workspace, state],
+        toolchain: .rust,
+        workspace: workspaceURL,
+        workspaceConfig: nil,
+        cacheRoot: cacheRoot,
+        environment: ["SPAWN_SAFE_MODE": "1"],
+        entrypoint: ["cargo", "test"],
+        allocateTerminal: true
+    )
+    let plan = launch.plan
+
+    #expect(launch.cacheNotices.isEmpty)
+    #expect(!expectedCaches.isEmpty)
+    #expect(plan.image == "spawn-rust:latest")
+    #expect(plan.mounts == [workspace, state] + expectedCaches)
+    #expect(expectedCaches.allSatisfy { CacheMounts.directoryStatus(at: $0.hostPath) == .ready })
+    #expect(plan.environment == ["SPAWN_SAFE_MODE": "1"])
+    #expect(plan.workdir == workspace.guestPath)
+    #expect(plan.entrypoint == ["cargo", "test"])
+    #expect(plan.resources == .init(cpus: 6, memory: "12g"))
+    #expect(plan.io == .init(keepStandardInputOpen: true, allocateTerminal: true))
+    #expect(plan.removeOnExit)
+}
+
+@Test func parsedRunPlanPreservesSharedOptInAndCustomImageExclusion() throws {
+    let workspaceURL = try makeTempDir(files: [:])
+    let cacheRoot = try makeTempDir(files: [:])
+    let workspace = Mount(hostPath: workspaceURL.path, readOnly: false)
+
+    let sharedRun = try parsedRun(["--cache", "shared"])
+    let sharedLaunch = try sharedRun.resolvedLaunch(
+        image: "spawn-rust:latest",
+        resolvedMounts: [workspace],
+        toolchain: .rust,
+        workspace: workspaceURL,
+        workspaceConfig: nil,
+        cacheRoot: cacheRoot,
+        environment: [:],
+        entrypoint: ["true"],
+        allocateTerminal: false
+    )
+    let sharedCaches = CacheMounts.forToolchain(
+        .rust,
+        scope: .shared,
+        workspace: workspaceURL,
+        root: cacheRoot
+    )
+
+    let customRun = try parsedRun(["--image", "ghcr.io/example/custom:latest"])
+    let customLaunch = try customRun.resolvedLaunch(
+        image: "ghcr.io/example/custom:latest",
+        resolvedMounts: [workspace],
+        toolchain: .rust,
+        workspace: workspaceURL,
+        workspaceConfig: nil,
+        cacheRoot: cacheRoot,
+        environment: [:],
+        entrypoint: ["true"],
+        allocateTerminal: false
+    )
+
+    #expect(!sharedCaches.isEmpty)
+    #expect(sharedLaunch.plan.mounts == [workspace] + sharedCaches)
+    #expect(sharedCaches.allSatisfy { $0.hostPath.hasPrefix(cacheRoot.path + "/shared/") })
+    #expect(customLaunch.plan.mounts == [workspace])
+    #expect(customLaunch.cacheNotices.isEmpty)
+}
+
+@Test func aLaunchNeverWarnsAboutSharingItDidNotMountOrMountsSharingItDidNotWarnAbout() throws {
+    // The invariant the launch type exists for: the notice a run prints and the
+    // directories it mounts come from one decision. Asserting them together is
+    // what makes a scope substituted on either side of the launch fail here
+    // instead of only in the container argv.
+    let workspaceURL = try makeTempDir(files: [:])
+    let cacheRoot = try makeTempDir(files: [:])
+    let workspace = Mount(hostPath: workspaceURL.path, readOnly: false)
+    let hostileConfig = WorkspaceConfig(
+        toolchainName: nil,
+        agentName: nil,
+        accessName: nil,
+        cacheName: "shared"
+    )
+    let cases: [(arguments: [String], config: WorkspaceConfig?, sharing: Bool)] = [
+        ([], nil, false),
+        ([], hostileConfig, false),
+        (["--cache", "workspace"], hostileConfig, false),
+        (["--cache", "shared"], nil, true),
+        (["--cache", "shared"], hostileConfig, true),
+    ]
+
+    for testCase in cases {
+        let launch = try parsedRun(testCase.arguments).resolvedLaunch(
+            image: "spawn-rust:latest",
+            resolvedMounts: [workspace],
+            toolchain: .rust,
+            workspace: workspaceURL,
+            workspaceConfig: testCase.config,
+            cacheRoot: cacheRoot,
+            environment: [:],
+            entrypoint: ["true"],
+            allocateTerminal: false
+        )
+        let caches = launch.plan.mounts.filter { $0.hostPath.hasPrefix(cacheRoot.path + "/") }
+        let mountedShared = caches.contains { $0.hostPath.hasPrefix(cacheRoot.path + "/shared/") }
+        let warnedAboutSharing = launch.cacheNotices.contains { $0.contains("readable and writable") }
+
+        #expect(!caches.isEmpty)
+        #expect(mountedShared == testCase.sharing)
+        #expect(warnedAboutSharing == testCase.sharing)
+        // A repo asking to share is refused, and the refusal is reported by the
+        // same value that mounted the private caches.
+        let refusedRepoSharing = launch.cacheNotices.contains {
+            $0.hasPrefix("Warning: ignoring .spawn.toml cache=shared.")
+        }
+        #expect(refusedRepoSharing == (testCase.config != nil && testCase.arguments.isEmpty))
+    }
+}
+
+// MARK: - What a run tells the user about its cache scope
+
+@Test func aSharedRunSaysTheCacheIsSharedAndAnOrdinaryRunSaysNothing() {
+    #expect(RunLaunchSummary.cacheNotices(scope: .workspace, ignoredConfiguredScope: nil).isEmpty)
+
+    let shared = RunLaunchSummary.cacheNotices(scope: .shared, ignoredConfiguredScope: nil)
+    #expect(shared.count == 1)
+    #expect(shared.allSatisfy { $0.contains("--cache shared") })
+    #expect(shared.allSatisfy { $0.contains("readable and writable") })
+}
+
+@Test func aRunReportsTheRepoCacheScopeItRefused() {
+    let notices = RunLaunchSummary.cacheNotices(scope: .workspace, ignoredConfiguredScope: .shared)
+
+    #expect(notices.count == 1)
+    guard let warning = notices.first else {
+        Issue.record("no notice for an ignored cache scope")
+        return
+    }
+    // Same shape as the access warning: what was ignored, and the flag that
+    // would honour it.
+    #expect(warning.hasPrefix("Warning: ignoring .spawn.toml cache=shared."))
+    #expect(warning.contains("Pass '--cache shared' explicitly"))
 }

@@ -45,6 +45,29 @@ enum RunLaunchSummary: Sendable {
         ]
     }
 
+    /// Lines a run prints about its build-cache scope, in order.
+    ///
+    /// Pure so the wording is under test: these two lines are the only signal a
+    /// user gets that a repo asked to share caches and was refused, or that this
+    /// run is writing into caches other workspaces can read.
+    static func cacheNotices(scope: CacheScope, ignoredConfiguredScope: CacheScope?) -> [String] {
+        var lines: [String] = []
+
+        if let ignored = ignoredConfiguredScope {
+            lines.append(
+                "Warning: ignoring .spawn.toml cache=\(ignored.rawValue). Pass '--cache \(ignored.rawValue)' explicitly to opt into cross-workspace cache sharing."
+            )
+        }
+
+        if scope == .shared {
+            lines.append(
+                "Note: build caches are shared with every workspace using '--cache shared'; they are readable and writable by all of them."
+            )
+        }
+
+        return lines
+    }
+
     private static func sessionDescription(shell: Bool, command: [String]) -> String {
         if shell {
             return "shell (/bin/bash)"

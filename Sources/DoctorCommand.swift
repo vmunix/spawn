@@ -68,6 +68,7 @@ extension Spawn {
         struct Report: Codable, Sendable, Equatable {
             let checks: [CheckReport]
             let workspace: WorkspaceReport
+            let nativeCache: NativeCacheStore.Snapshot?
         }
 
         static let configuration = CommandConfiguration(
@@ -85,6 +86,7 @@ extension Spawn {
                   default kernel and Rosetta readiness
                   spawn-managed images
                   env file and persisted agent state
+                  native backend cache location and allocated size
                   workspace detection, defaults, and runtime cache status
 
                 JSON output adds:
@@ -92,6 +94,7 @@ extension Spawn {
                   workspace              Structured workspace result
                   workspace.defaults     Configured workspace values from .spawn.toml
                   workspace.runtime      Workspace-image cache state and tracked paths
+                  nativeCache            Native artifact paths and allocated bytes
                 """
         )
 
@@ -139,7 +142,7 @@ extension Spawn {
 
             return SystemStatus(
                 status: status,
-                appRoot: fields["appRoot"]
+                appRoot: fields["paths.appRoot"] ?? fields["appRoot"]
             )
         }
 
@@ -412,7 +415,8 @@ extension Spawn {
 
         private static func report(
             checks: [Check],
-            workspace: WorkspaceReport
+            workspace: WorkspaceReport,
+            nativeCache: NativeCacheStore.Snapshot?
         ) -> Report {
             Report(
                 checks: checks.map { check in
@@ -422,8 +426,64 @@ extension Spawn {
                         detail: check.detail
                     )
                 },
-                workspace: workspace
+                workspace: workspace,
+                nativeCache: nativeCache
             )
+        }
+
+        static func nativeCacheCheck(
+            stateDir: URL = Paths.stateDir
+        ) -> (check: Check, snapshot: NativeCacheStore.Snapshot?) {
+            let store = NativeCacheStore(
+                stateRoot: stateDir.appendingPathComponent("native-runtime")
+            )
+            do {
+                let snapshot = try store.snapshot()
+                guard !snapshot.entries.isEmpty else {
+                    return (
+                        Check(
+                            status: .ok,
+                            title: "Native cache",
+                            detail: "none yet at \(snapshot.path)"
+                        ),
+                        snapshot
+                    )
+                }
+
+                let descriptions = snapshot.entries.map { entry in
+                    let formatted = ByteCountFormatter.string(
+                        fromByteCount: Int64(clamping: entry.allocatedBytes),
+                        countStyle: .file
+                    )
+                    let qualifier: String
+                    if entry.isCurrent {
+                        qualifier = "current"
+                    } else if entry.isPendingDeletion {
+                        qualifier = "interrupted cleanup; retry 'spawn cache clean --native'"
+                    } else {
+                        qualifier = "older; manual cleanup"
+                    }
+                    return "\(entry.path) (about \(formatted) allocated, \(qualifier))"
+                }
+                return (
+                    Check(
+                        status: .ok,
+                        title: "Native cache",
+                        detail: descriptions.joined(separator: ", ")
+                            + ". Use 'spawn cache clean --native' to reclaim the current version."
+                    ),
+                    snapshot
+                )
+            } catch {
+                return (
+                    Check(
+                        status: .warning,
+                        title: "Native cache",
+                        detail: "Unable to inspect native cache at \(store.stateRoot.path): \(error)"
+                    ),
+                    nil
+                )
+            }
         }
 
         static func renderJSON(_ report: Report) throws -> String {
@@ -450,6 +510,92 @@ extension Spawn {
                 status: .ok,
                 title: "Images",
                 detail: "\(images.count) spawn image\(images.count == 1 ? "" : "s") available: \(images.joined(separator: ", "))"
+            )
+        }
+
+        /// Reports the host directories that hold a toolchain's build caches.
+        ///
+        /// The caches deliberately live outside the image, and off every path spawn
+        /// seeds into a home, so nothing in a workspace or a home reveals them —
+        /// even the one that mounts inside the home (npm's `$HOME/.npm`). Naming
+        /// their host paths here is what makes them inspectable (`ls`) and
+        /// removable (`rm -rf <path>`).
+        ///
+        /// `status` is injected so the check stays pure and unit-testable. A
+        /// directory that has not been created yet is normal before a toolchain's
+        /// first run — spawn creates it on demand — so it is annotated rather than
+        /// reported as a fault.
+        static func cacheMountCheck(
+            toolchain: Toolchain,
+            scope: CacheScope,
+            mounts: [Mount],
+            status: @Sendable (String) -> CacheMounts.DirectoryStatus = { CacheMounts.directoryStatus(at: $0) }
+        ) -> Check {
+            guard !mounts.isEmpty else {
+                return Check(
+                    status: .ok,
+                    title: "Build caches",
+                    detail: "\(toolchain.rawValue): none needed"
+                )
+            }
+
+            let statuses = mounts.map { mount in
+                (mount, status(mount.hostPath))
+            }
+            let described = statuses.map { mount, status in
+                switch status {
+                case .missing:
+                    return "\(mount.hostPath) (not created yet)"
+                case .ready:
+                    return mount.hostPath
+                case .notDirectory:
+                    return "\(mount.hostPath) (not a directory)"
+                case .notWritable:
+                    return "\(mount.hostPath) (not writable)"
+                }
+            }
+            let hasUnusablePath = statuses.contains { _, status in
+                status == .notDirectory || status == .notWritable
+            }
+
+            return Check(
+                status: hasUnusablePath ? .warning : .ok,
+                title: "Build caches",
+                detail: "\(toolchain.rawValue) [\(scope.rawValue) scope]: \(described.joined(separator: ", "))"
+            )
+        }
+
+        /// The build caches this workspace's runs would actually mount.
+        ///
+        /// Doctor must resolve the scope the same way a run does, or it would
+        /// name directories no run ever touches. Because a run without `--cache`
+        /// can only land on the private scope, a `.spawn.toml` asking to share
+        /// is reported as ignored — the same shape as the access default, where
+        /// the config value is shown next to the flag that would honour it.
+        static func cacheCheck(
+            workspace: URL,
+            toolchain: Toolchain,
+            workspaceConfig: WorkspaceConfig?,
+            root: URL = CacheMounts.root(),
+            status: @Sendable (String) -> CacheMounts.DirectoryStatus = { CacheMounts.directoryStatus(at: $0) }
+        ) -> Check {
+            let selection = RunRuntimePolicy.defaultCacheSelection(workspaceConfig: workspaceConfig)
+            let check = cacheMountCheck(
+                toolchain: toolchain,
+                scope: selection.scope,
+                mounts: selection.mounts(toolchain: toolchain, workspace: workspace, root: root),
+                status: status
+            )
+
+            guard let ignored = selection.ignoredConfiguredScope else {
+                return check
+            }
+
+            return Check(
+                status: check.status,
+                title: check.title,
+                detail: check.detail
+                    + " [.spawn.toml cache=\(ignored.rawValue) ignored; pass '--cache \(ignored.rawValue)' to opt in]"
             )
         }
 
@@ -686,6 +832,15 @@ extension Spawn {
             checks.append(Self.imageCheck())
             checks.append(Self.envCheck())
             checks.append(Self.workspaceCheck(at: workspace))
+            let cacheToolchain = inspection.toolchain ?? .base
+            checks.append(
+                Self.cacheCheck(
+                    workspace: workspace,
+                    toolchain: cacheToolchain,
+                    workspaceConfig: workspaceConfig
+                ))
+            let nativeCache = Self.nativeCacheCheck()
+            checks.append(nativeCache.check)
             checks.append(contentsOf: Self.stateChecks())
 
             let workspaceReport = Self.workspaceReport(
@@ -695,7 +850,15 @@ extension Spawn {
             )
 
             if json {
-                Swift.print(try Self.renderJSON(Self.report(checks: checks, workspace: workspaceReport)))
+                Swift.print(
+                    try Self.renderJSON(
+                        Self.report(
+                            checks: checks,
+                            workspace: workspaceReport,
+                            nativeCache: nativeCache.snapshot
+                        )
+                    )
+                )
                 return
             }
 

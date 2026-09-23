@@ -7,10 +7,11 @@ DEVELOPER_DIR ?= $(XCODE_DEVELOPER_DIR)
 export DEVELOPER_DIR
 endif
 
-.PHONY: build install uninstall clean test lint format images smoke
+.PHONY: build install uninstall clean test lint format smoke
 
 build:
 	swift build -c release
+	codesign --force --sign - --timestamp=none --entitlements spawn.entitlements .build/release/$(BINARY)
 
 lint:
 	swift format lint --strict -r Sources Tests
@@ -33,10 +34,3 @@ clean:
 
 smoke: build
 	./scripts/smoke.sh
-
-images:
-	container build -t spawn-base:latest -f Images/base/Containerfile .
-	container build -t spawn-cpp:latest -f Images/cpp/Containerfile .
-	container build -t spawn-rust:latest -f Images/rust/Containerfile .
-	container build -t spawn-go:latest -f Images/go/Containerfile .
-	container build -t spawn-js:latest -f Images/js/Containerfile .
